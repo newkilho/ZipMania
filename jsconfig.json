@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "target": "ESNext",
+    "module": "ESNext",
+    "checkJs": true,
+    "allowJs": true
+  },
+  "include": ["src/**/*.js", "src/**/*.svelte"],
+  "exclude": ["node_modules", "dist", "src-tauri"]
+}

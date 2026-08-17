@@ -1,0 +1,150 @@
+/*
+ * ZipMania default CSS skin.
+ *
+ * The application keeps its original Svelte DOM and component layout.
+ * This file only supplies visual values and optional background images.
+ */
+
+:root[data-skin="default"] {
+  color-scheme: light;
+  --font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-size: 13px;
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --border: #e0e0e0;
+  --text: #1a1a1a;
+  --text-muted: #888888;
+  --btn-bg: #ffffff;
+  --accent: #3b82f6;
+  --accent-contrast: #ffffff;
+  --icon-archive: #3b82f6;
+  --icon-glyph: #ffffff;
+  --scroll-thumb: #dcdcdc;
+  --scroll-thumb-hover: #b4b4b4;
+  --window-border-active: #3d84dd;
+  --window-border-inactive: #6d6d6d;
+  --overlay-bg: rgb(0 0 0 / 45%);
+  --dialog-shadow: 0 8px 30px rgb(0 0 0 / 30%);
+  --toast-shadow: 0 10px 34px rgb(0 0 0 / 28%);
+  --preview-bg: #000000;
+  --tree-bg: #ffffff;
+  --progress-success: #2e7d32;
+  --ok-bg: #e6f4ea;
+  --ok-text: #1e6b34;
+  --warn-bg: #fdf3e0;
+  --warn-text: #8a5a12;
+  --alert-bg: #fde8e8;
+  --alert-text: #9b1c1c;
+  --neutral-bg: #f2f2f2;
+  --neutral-text: #666666;
+
+  /* none 또는 url("./images/name.webp") */
+  --skin-app-background: none;
+  --skin-toolbar-background: none;
+  --skin-sidebar-background: none;
+  --skin-content-background: none;
+  --skin-empty-background: none;
+  --skin-dialog-background: none;
+  --skin-background-size: cover;
+  --skin-background-position: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="default"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1e1e1e;
+    --surface: #252526;
+    --border: #3a3a3a;
+    --text: #e0e0e0;
+    --text-muted: #999999;
+    --btn-bg: #333333;
+    --accent: #3b82f6;
+    --icon-archive: #5b9bf8;
+    --scroll-thumb: #4a4a4a;
+    --scroll-thumb-hover: #6a6a6a;
+    --tree-bg: #1e1e1e;
+    --ok-bg: #1e3524;
+    --ok-text: #a6e0ba;
+    --warn-bg: #3a2f1a;
+    --warn-text: #e6c88a;
+    --alert-bg: #3b1f1f;
+    --alert-text: #f7b4b4;
+    --neutral-bg: #2a2a2a;
+    --neutral-text: #cfcfcf;
+  }
+}
+
+:root[data-skin="default"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --surface: #252526;
+  --border: #3a3a3a;
+  --text: #e0e0e0;
+  --text-muted: #999999;
+  --btn-bg: #333333;
+  --accent: #3b82f6;
+  --icon-archive: #5b9bf8;
+  --scroll-thumb: #4a4a4a;
+  --scroll-thumb-hover: #6a6a6a;
+  --tree-bg: #1e1e1e;
+  --ok-bg: #1e3524;
+  --ok-text: #a6e0ba;
+  --warn-bg: #3a2f1a;
+  --warn-text: #e6c88a;
+  --alert-bg: #3b1f1f;
+  --alert-text: #f7b4b4;
+  --neutral-bg: #2a2a2a;
+  --neutral-text: #cfcfcf;
+}
+
+/* Optional background images applied without changing the original layout. */
+:root[data-skin="default"] body,
+:root[data-skin="default"] #app {
+  background-color: var(--bg);
+  background-image: var(--skin-app-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="toolbar"] {
+  background-color: var(--surface);
+  background-image: var(--skin-toolbar-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="sidebar"],
+:root[data-skin="default"] body #app [data-ui="folder-tree"],
+:root[data-skin="default"] body #app [data-ui="preview-pane"] {
+  background-image: var(--skin-sidebar-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="file-table"],
+:root[data-skin="default"] body #app [data-ui="app-main"] {
+  background-image: var(--skin-content-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="empty-state"] {
+  background-image: var(--skin-empty-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="dialog-card"],
+:root[data-skin="default"] body #app [data-ui="compress-window"],
+:root[data-skin="default"] body #app [data-ui="extract-window"],
+:root[data-skin="default"] body #app [data-ui="settings-window"] {
+  background-image: var(--skin-dialog-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}

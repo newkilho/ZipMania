@@ -1,0 +1,68 @@
+[package]
+name = "zipmania"
+version = "0.9.0"
+description = "ZipMania - 현대적 Windows 압축 프로그램"
+authors = ["BNO Corp"]
+edition = "2021"
+rust-version = "1.88"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# 압축모듈(재사용 크레이트). 목록·해제·압축·테스트·메모리 읽기를 백엔드 추상화로 제공.
+zipmania-archive = { path = "../crates/zipmania-archive" }
+# UI 텍스트 정본(앱 화면, 탐색기 메뉴, 파일 유형 이름). 프런트 사전과 셸 확장 헤더도 여기서 생성.
+zipmania-i18n = { path = "../crates/zipmania-i18n" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+# 탐색기 우클릭에서 파일당 실행되는 ZipMania.exe 를 첫 인스턴스로 포워딩(다중 선택 취합용).
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 앱 설정(settings.toml) 직렬화 — 사람이 읽기 좋은 config 저장용.
+toml = "0.8"
+# 파일 목록의 실제 시스템 아이콘 추출용. Windows Shell/GDI API + PNG 인코딩 + base64 데이터 URI.
+png = "0.17"
+base64 = "0.22"
+
+# 공용 라이브러리(KLib). 업데이트 확인과 네이티브 다이얼로그.
+klib-update = { path = "../../KLib/crates/klib-update" }
+klib-dialog = { path = "../../KLib/crates/klib-dialog" }
+
+# Windows 전용: 확장자별 시스템 아이콘 추출(SHGetFileInfoW 등).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    # SHGetFileInfoW 의 dwFileAttributes 타입(FILE_FLAGS_AND_ATTRIBUTES)·상수가 여기에 있다.
+    "Win32_Storage_FileSystem",
+    # SHGetFileInfoW(SHGFI_ICON) 는 호출 스레드에 COM 초기화가 필요하다.
+    "Win32_System_Com",
+    # 가상 파일 Shell Drag&Drop(B안): DoDragDrop/IDropSource/IDataObject/STGMEDIUM,
+    # 클립보드 포맷 등록, HGLOBAL 할당, 메모리 스트림.
+    "Win32_System_Ole",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    # AMSI 바이러스 검사: AmsiInitialize/AmsiScanBuffer/AmsiUninitialize.
+    "Win32_System_Antimalware",
+    # 창 제목 표시줄 다크 모드: DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE).
+    # 확장자별 기본 앱 선택 창(assoc_picker)에서 속성 창을 감출 때 DWMWA_CLOAK 도 쓴다.
+    "Win32_Graphics_Dwm",
+    # 확장자별 기본 앱 선택 창: SetWinEventHook 으로 속성 창이 만들어지는 순간을 잡는다.
+    "Win32_UI_Accessibility",
+    # 위 판정에 쓰는 GetCurrentProcessId.
+    "Win32_System_Threading",
+    # 업데이트 확인에 보낼 OS 언어: GetUserDefaultLocaleName.
+    "Win32_Globalization",
+] }
+# #[implement] 매크로가 생성하는 코드가 `windows_core` 크레이트 경로를 참조하므로 명시적으로 둔다.
+windows-core = "0.61"
+# 탐색기 통합: HKCU 레지스트리에 셸 확장(CLSID)·verb 등록/해제.
+winreg = "0.52"
+
+# 릴리스 프로파일(codegen-units/lto/opt-level/strip)은 워크스페이스 루트 Cargo.toml 에 둔다.

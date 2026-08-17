@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko" data-skin="default">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZipMania 스킨 미리보기</title>
+    <link rel="stylesheet" href="./preview/style.css" />
+    <link rel="stylesheet" href="./skin.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-width: 680px;
+        min-height: 100vh;
+        padding: 16px;
+        color: var(--text);
+        background: var(--surface);
+        font-family: var(--font-family);
+        font-size: var(--font-size);
+      }
+      .preview-tools {
+        width: 640px;
+        margin: 0 auto 12px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .preview-tools strong { flex: 1; }
+      .preview-tools span { color: var(--text-muted); font-size: 12px; }
+      .theme-switch,
+      .mode-switch {
+        display: inline-flex;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+      }
+      .theme-switch button,
+      .mode-switch button {
+        padding: 5px 11px;
+        border: 0;
+        border-left: 1px solid var(--border);
+        color: var(--text);
+        background: var(--btn-bg);
+        font: inherit;
+        cursor: pointer;
+      }
+      .theme-switch button:first-child,
+      .mode-switch button:first-child { border-left: 0; }
+      .theme-switch button.on,
+      .mode-switch button.on { color: var(--accent-contrast); background: var(--accent); }
+      #app {
+        width: 640px;
+        height: 600px;
+        margin: 0 auto;
+        background: var(--bg);
+        box-shadow: var(--dialog-shadow);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-tools">
+      <strong>ZipMania 실제 컴포넌트 미리보기</strong>
+      <span>640 × 600</span>
+      <div class="mode-switch" aria-label="화면 상태 선택">
+        <button type="button" data-preview-mode="archive" class="on">파일 열림</button>
+        <button type="button" data-preview-mode="empty">파일 없음</button>
+      </div>
+      <div class="theme-switch" aria-label="테마 선택">
+        <button type="button" data-theme-value="system" class="on">시스템</button>
+        <button type="button" data-theme-value="light">라이트</button>
+        <button type="button" data-theme-value="dark">다크</button>
+      </div>
+    </div>
+    <div id="app"></div>
+    <script src="./preview/preview.js"></script>
+    <script>
+      const buttons = document.querySelectorAll("[data-theme-value]");
+      const modeButtons = document.querySelectorAll("[data-preview-mode]");
+      const initialMode = new URLSearchParams(location.search).get("mode") === "empty" ? "empty" : "archive";
+      modeButtons.forEach((item) => item.classList.toggle("on", item.dataset.previewMode === initialMode));
+      buttons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const theme = button.dataset.themeValue;
+          if (theme === "system") document.documentElement.removeAttribute("data-theme");
+          else document.documentElement.dataset.theme = theme;
+          buttons.forEach((item) => item.classList.toggle("on", item === button));
+        });
+      });
+      modeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          window.dispatchEvent(new CustomEvent("zipmania-preview-mode", { detail: button.dataset.previewMode }));
+          modeButtons.forEach((item) => item.classList.toggle("on", item === button));
+        });
+      });
+    </script>
+  </body>
+</html>

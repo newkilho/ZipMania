@@ -1,0 +1,25 @@
+[package]
+name = "zipmania-archive"
+version = "0.1.0"
+description = "ZipMania 압축모듈 — ArchiveBackend 추상화 + 7z 백엔드 (재사용 크레이트)"
+authors = ["BNO Corp"]
+edition = "2021"
+rust-version = "1.88"
+
+# Tauri 의존 금지. ZipManiaError/ArchiveEntry 직렬화를 위해 serde 를 의존한다.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+# EGG/ALZ 백엔드(순수 Rust, 플랫폼 무관). C 툴체인을 끌어들이지 않으려고
+# flate2 대신 miniz_oxide 를 직접 쓴다(musl/wasm/Android 크로스 빌드 단순화).
+miniz_oxide = "0.8"
+encoding_rs = "0.8"
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2", "deflate-flate2-zlib-rs", "aes-crypto", "deflate64", "bzip2", "lzma", "xz", "ppmd", "legacy-zip", "time"] }
+time = { version = "0.3.55", features = ["local-offset"] }
+
+# 7z.dll in-process COM 호출용(순수 Rust, bit7z·CLI 불필요).
+# **Windows 전용 의존이다.** 이 크레이트를 쓰는 프로젝트가 Windows 에 고정되지 않도록
+# 플랫폼별 의존으로 분리하고, 쓰는 쪽(backend::sevenzip)도 cfg(windows) 로 게이팅한다.
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.61"

@@ -1,0 +1,234 @@
+/*
+ * ZipMania "ocean-test" CSS 스킨 — 여름 바다.
+ *
+ * 앱의 Svelte DOM 과 레이아웃은 그대로 두고, 색·그림자·배경만 바꾼다.
+ * 툴바는 수평선에서 모래사장으로 이어지는 바다 그라데이션 위에
+ * 물결 한 줄을 깔고, 버튼을 유리(半투명) 타일처럼 띄운다.
+ */
+
+:root[data-skin="ocean-test"] {
+  color-scheme: light;
+  --font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-size: 13px;
+  --bg: #ffffff;
+  --surface: #eaf7fb;
+  --border: #cfe8f0;
+  --text: #10323d;
+  --text-muted: #6f93a0;
+  --btn-bg: #f3fbfd;
+  --accent: #0ea5c6;
+  --accent-contrast: #ffffff;
+  --icon-archive: #0ea5c6;
+  --icon-glyph: #ffffff;
+  --scroll-thumb: #cbe6ee;
+  --scroll-thumb-hover: #96cddd;
+  --window-border-active: #0ea5c6;
+  --window-border-inactive: #8fa8b0;
+  --overlay-bg: rgb(4 40 52 / 45%);
+  --dialog-shadow: 0 8px 30px rgb(6 52 68 / 30%);
+  --toast-shadow: 0 10px 34px rgb(6 52 68 / 28%);
+  --preview-bg: #04212b;
+  --tree-bg: #fbfeff;
+  --progress-success: #0f9d8f;
+  --ok-bg: #dff6f1;
+  --ok-text: #0b6b5f;
+  --warn-bg: #fdf1dd;
+  --warn-text: #8a5a12;
+  --alert-bg: #fde8e8;
+  --alert-text: #9b1c1c;
+  --neutral-bg: #eef6f9;
+  --neutral-text: #5d7a85;
+
+  /* 툴바 바다 — 색만 여기서 바꾸면 그라데이션 전체가 따라온다. */
+  --sea-deep: #0a6f96;
+  --sea-mid: #12a6c9;
+  --sea-shallow: #4ad4e3;
+  --sea-foam: #b6f0f3;
+  --sea-ink: #063948;
+
+  /* none 또는 url("./images/name.webp") */
+  --skin-app-background: none;
+  --skin-toolbar-background: none;
+  --skin-sidebar-background: none;
+  --skin-content-background: none;
+  --skin-empty-background: none;
+  --skin-dialog-background: none;
+  --skin-background-size: cover;
+  --skin-background-position: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="ocean-test"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #10222a;
+    --surface: #16303a;
+    --border: #274a57;
+    --text: #dceff5;
+    --text-muted: #8fb0bb;
+    --btn-bg: #1e3b46;
+    --accent: #35c4dd;
+    --icon-archive: #4ed3e8;
+    --scroll-thumb: #2c5361;
+    --scroll-thumb-hover: #43788a;
+    --tree-bg: #12262f;
+    --preview-bg: #06161c;
+    --progress-success: #2fbfae;
+    --ok-bg: #123a37;
+    --ok-text: #8fe3d5;
+    --warn-bg: #3a2f1a;
+    --warn-text: #e6c88a;
+    --alert-bg: #3b1f1f;
+    --alert-text: #f7b4b4;
+    --neutral-bg: #1c3540;
+    --neutral-text: #c3dae2;
+
+    --sea-deep: #05303f;
+    --sea-mid: #0a5064;
+    --sea-shallow: #10788f;
+    --sea-foam: #57c9d6;
+    --sea-ink: #021c25;
+  }
+}
+
+:root[data-skin="ocean-test"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #10222a;
+  --surface: #16303a;
+  --border: #274a57;
+  --text: #dceff5;
+  --text-muted: #8fb0bb;
+  --btn-bg: #1e3b46;
+  --accent: #35c4dd;
+  --icon-archive: #4ed3e8;
+  --scroll-thumb: #2c5361;
+  --scroll-thumb-hover: #43788a;
+  --tree-bg: #12262f;
+  --preview-bg: #06161c;
+  --progress-success: #2fbfae;
+  --ok-bg: #123a37;
+  --ok-text: #8fe3d5;
+  --warn-bg: #3a2f1a;
+  --warn-text: #e6c88a;
+  --alert-bg: #3b1f1f;
+  --alert-text: #f7b4b4;
+  --neutral-bg: #1c3540;
+  --neutral-text: #c3dae2;
+
+  --sea-deep: #05303f;
+  --sea-mid: #0a5064;
+  --sea-shallow: #10788f;
+  --sea-foam: #57c9d6;
+  --sea-ink: #021c25;
+}
+
+/* Optional background images applied without changing the original layout. */
+:root[data-skin="ocean-test"] body,
+:root[data-skin="ocean-test"] #app {
+  background-color: var(--bg);
+  background-image: var(--skin-app-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+/* ── 툴바: 여름 바다 ────────────────────────────────────────────────
+ * 레이어 순서(위 → 아래): 사용자 배경 이미지 · 아래쪽 물결 · 수면 반짝임
+ * · 바다 그라데이션. 사용자가 --skin-toolbar-background 를 지정하면
+ * 물결 위에 얹힌다.
+ */
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] {
+  --wave: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="14" viewBox="0 0 120 14"><path d="M0 9c10 0 10-5 20-5s10 5 20 5 10-5 20-5 10 5 20 5 10-5 20-5 10 5 20 5v5H0z" fill="white" fill-opacity="0.30"/><path d="M0 12c10 0 10-4 20-4s10 4 20 4 10-4 20-4 10 4 20 4 10-4 20-4 10 4 20 4v2H0z" fill="white" fill-opacity="0.55"/></svg>');
+  background-color: var(--sea-mid);
+  background-image:
+    var(--skin-toolbar-background),
+    var(--wave),
+    radial-gradient(120% 90% at 12% -30%, rgb(255 255 255 / 45%) 0%, rgb(255 255 255 / 0%) 60%),
+    linear-gradient(180deg, var(--sea-deep) 0%, var(--sea-mid) 48%, var(--sea-shallow) 100%);
+  background-position: var(--skin-background-position), left bottom, center, center;
+  background-size: var(--skin-background-size), 120px 14px, cover, cover;
+  background-repeat: no-repeat, repeat-x, no-repeat, no-repeat;
+  border-bottom: 1px solid var(--sea-foam);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%);
+  padding: 8px 10px 10px;
+}
+
+/* 툴바 안에서는 글자·아이콘이 바다 위에 놓인다.
+ * 아이콘 안쪽 획은 인라인 SVG 가 var(--accent-contrast) 를 쓰므로,
+ * 이 범위에서만 깊은 바다색으로 바꿔 흰 아이콘 위에 파낸 것처럼 보이게 한다. */
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button {
+  --accent-contrast: var(--sea-ink);
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgb(3 42 56 / 45%);
+  transition: background-color .12s ease, border-color .12s ease, transform .12s ease;
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button svg {
+  color: #ffffff;
+  filter: drop-shadow(0 1px 1.5px rgb(3 42 56 / 40%));
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 22%);
+  border-color: rgb(255 255 255 / 55%);
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button:active:not(:disabled),
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button.active,
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button.active:hover:not(:disabled) {
+  background: rgb(255 255 255 / 92%);
+  border-color: #ffffff;
+  color: var(--sea-ink);
+  text-shadow: none;
+  transform: translateY(1px);
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button:active:not(:disabled) svg,
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button.active svg {
+  color: var(--sea-deep);
+  filter: none;
+}
+
+/* 눌린 버튼 안에서는 아이콘 획이 흰 배경 위로 오므로 다시 흰색으로. */
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button:active:not(:disabled),
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] button.active {
+  --accent-contrast: #ffffff;
+}
+
+/* 그룹 구분선 — 물빛 위의 옅은 흰 선. */
+:root[data-skin="ocean-test"] body #app [data-ui="toolbar"] span.divider {
+  background: rgb(255 255 255 / 40%);
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="sidebar"],
+:root[data-skin="ocean-test"] body #app [data-ui="folder-tree"],
+:root[data-skin="ocean-test"] body #app [data-ui="preview-pane"] {
+  background-image: var(--skin-sidebar-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="file-table"],
+:root[data-skin="ocean-test"] body #app [data-ui="app-main"] {
+  background-image: var(--skin-content-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="empty-state"] {
+  background-image: var(--skin-empty-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="ocean-test"] body #app [data-ui="dialog-card"],
+:root[data-skin="ocean-test"] body #app [data-ui="compress-window"],
+:root[data-skin="ocean-test"] body #app [data-ui="extract-window"],
+:root[data-skin="ocean-test"] body #app [data-ui="settings-window"] {
+  background-image: var(--skin-dialog-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}

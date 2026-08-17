@@ -1,0 +1,4 @@
+# Windows 표준(Tauri 공식 권장) MSVC 툴체인을 사용한다.
+# 링커: VS Build Tools 2022 (VC++ 워크로드) — (D)
+[toolchain]
+channel = "stable-x86_64-pc-windows-msvc"

@@ -1,0 +1,29 @@
+# 프론트엔드
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust / Tauri
+src-tauri/target
+target
+
+# 크래시 덤프(cygwin/msys 도구가 남긴다)
+*.stackdump
+
+# 에디터
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 내 맘
+*.bat
+
+# vite 가 설정을 로드할 때 만드는 임시 파일(빌드 부산물)
+vite.config.js.timestamp-*

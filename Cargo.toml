@@ -1,0 +1,16 @@
+# ── Cargo 워크스페이스 루트 ──
+# 압축 로직은 재사용 크레이트 crates/zipmania-archive 로 분리하고,
+# Tauri 앱(src-tauri)은 그것을 path 의존한다.
+# spike-7zdll 은 검증용 독립 프로젝트이므로 워크스페이스에서 제외한다.
+[workspace]
+members = ["crates/zipmania-archive", "crates/zipmania-i18n", "src-tauri"]
+exclude = ["spike-7zdll"]
+resolver = "2"
+
+# 릴리스 프로파일은 워크스페이스 루트에서만 유효하다(멤버 패키지의 profile 은 무시됨).
+# 개발 중 릴리스 최적화는 불필요하므로 기존 ZipMania 설정만 유지한다.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1,0 +1,268 @@
+/*
+ * ZipMania default CSS skin.
+ *
+ * The application keeps its original Svelte DOM and component layout.
+ * This file only supplies visual values and optional background images.
+ */
+
+:root[data-skin="default"] {
+  color-scheme: light;
+  --font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-size: 13px;
+  --bg: #ffffff;
+  --surface: #f5f5f7;
+  --border: #e0e0e0;
+  --text: #1a1a1a;
+  --text-muted: #888888;
+  --btn-bg: #ffffff;
+  --accent: #3b82f6;
+  --accent-contrast: #ffffff;
+  --icon-archive: #3b82f6;
+  --icon-glyph: #ffffff;
+  --scroll-thumb: #dcdcdc;
+  --scroll-thumb-hover: #b4b4b4;
+  --window-border-active: #3d84dd;
+  --window-border-inactive: #6d6d6d;
+  --overlay-bg: rgb(0 0 0 / 45%);
+  --dialog-shadow: 0 8px 30px rgb(0 0 0 / 30%);
+  --toast-shadow: 0 10px 34px rgb(0 0 0 / 28%);
+  --preview-bg: #000000;
+  --tree-bg: #ffffff;
+  --progress-success: #2e7d32;
+  --ok-bg: #e6f4ea;
+  --ok-text: #1e6b34;
+  --warn-bg: #fdf3e0;
+  --warn-text: #8a5a12;
+  --alert-bg: #fde8e8;
+  --alert-text: #9b1c1c;
+  --neutral-bg: #f2f2f2;
+  --neutral-text: #666666;
+
+  /* Ocean toolbar effect rendered with the default blue palette.
+     Light mode only: the dark blocks below reset these to the flat toolbar. */
+  --toolbar-deep: #2563eb;
+  --toolbar-mid: var(--accent);
+  --toolbar-shallow: #60a5fa;
+  --toolbar-foam: #bfdbfe;
+  --toolbar-ink: #1e3a5f;
+
+  --toolbar-wave: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%2214%22 viewBox=%220 0 120 14%22><path d=%22M0 9c10 0 10-5 20-5s10 5 20 5 10-5 20-5 10 5 20 5 10-5 20-5 10 5 20 5v5H0z%22 fill=%22white%22 fill-opacity=%220.30%22/><path d=%22M0 12c10 0 10-4 20-4s10 4 20 4 10-4 20-4 10 4 20 4 10-4 20-4 10 4 20 4v2H0z%22 fill=%22white%22 fill-opacity=%220.55%22/></svg>');
+  --toolbar-bg: var(--toolbar-mid);
+  --toolbar-layers:
+    var(--toolbar-wave),
+    radial-gradient(120% 90% at 12% -30%, rgb(255 255 255 / 45%) 0%, rgb(255 255 255 / 0%) 60%),
+    linear-gradient(180deg, var(--toolbar-deep) 0%, var(--toolbar-mid) 48%, var(--toolbar-shallow) 100%);
+  --toolbar-edge: var(--toolbar-foam);
+  --toolbar-inset: inset 0 1px 0 rgb(255 255 255 / 35%);
+  --toolbar-padding: 8px 10px 10px;
+  --toolbar-btn-text: #ffffff;
+  --toolbar-btn-shadow: 0 1px 2px rgb(15 23 42 / 45%);
+  --toolbar-btn-icon: #ffffff;
+  --toolbar-btn-icon-filter: drop-shadow(0 1px 1.5px rgb(15 23 42 / 40%));
+  --toolbar-btn-hover-bg: rgb(255 255 255 / 22%);
+  --toolbar-btn-hover-border: rgb(255 255 255 / 55%);
+  --toolbar-btn-on-bg: rgb(255 255 255 / 92%);
+  --toolbar-btn-on-border: #ffffff;
+  --toolbar-btn-on-text: var(--toolbar-ink);
+  --toolbar-btn-on-icon: var(--toolbar-deep);
+  --toolbar-btn-on-shift: translateY(1px);
+  --toolbar-btn-ink: var(--toolbar-ink);
+  --toolbar-divider: rgb(255 255 255 / 40%);
+
+  /* none 또는 url("./images/name.webp") */
+  --skin-app-background: none;
+  --skin-toolbar-background: none;
+  --skin-sidebar-background: none;
+  --skin-content-background: none;
+  --skin-empty-background: none;
+  --skin-dialog-background: none;
+  --skin-background-size: cover;
+  --skin-background-position: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-skin="default"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1e1e1e;
+    --surface: #252526;
+    --border: #3a3a3a;
+    --text: #e0e0e0;
+    --text-muted: #999999;
+    --btn-bg: #333333;
+    --accent: #3b82f6;
+    --icon-archive: #5b9bf8;
+    --scroll-thumb: #4a4a4a;
+    --scroll-thumb-hover: #6a6a6a;
+    --tree-bg: #1e1e1e;
+    --ok-bg: #1e3524;
+    --ok-text: #a6e0ba;
+    --warn-bg: #3a2f1a;
+    --warn-text: #e6c88a;
+    --alert-bg: #3b1f1f;
+    --alert-text: #f7b4b4;
+    --neutral-bg: #2a2a2a;
+    --neutral-text: #cfcfcf;
+
+    /* 다크에서는 오션 툴바를 쓰지 않고 예전 기본 스킨의 평평한 툴바로 되돌린다. */
+    --toolbar-bg: var(--surface);
+    --toolbar-layers: none, none, none;
+    --toolbar-edge: var(--border);
+    --toolbar-inset: none;
+    --toolbar-padding: 6px 10px;
+    --toolbar-btn-text: var(--text);
+    --toolbar-btn-shadow: none;
+    --toolbar-btn-icon: var(--accent);
+    --toolbar-btn-icon-filter: none;
+    --toolbar-btn-hover-bg: var(--btn-bg);
+    --toolbar-btn-hover-border: var(--border);
+    --toolbar-btn-on-bg: var(--accent);
+    --toolbar-btn-on-border: var(--accent);
+    --toolbar-btn-on-text: #ffffff;
+    --toolbar-btn-on-icon: #ffffff;
+    --toolbar-btn-on-shift: none;
+    --toolbar-btn-ink: #ffffff;
+    --toolbar-divider: var(--border);
+  }
+}
+
+:root[data-skin="default"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --surface: #252526;
+  --border: #3a3a3a;
+  --text: #e0e0e0;
+  --text-muted: #999999;
+  --btn-bg: #333333;
+  --accent: #3b82f6;
+  --icon-archive: #5b9bf8;
+  --scroll-thumb: #4a4a4a;
+  --scroll-thumb-hover: #6a6a6a;
+  --tree-bg: #1e1e1e;
+  --ok-bg: #1e3524;
+  --ok-text: #a6e0ba;
+  --warn-bg: #3a2f1a;
+  --warn-text: #e6c88a;
+  --alert-bg: #3b1f1f;
+  --alert-text: #f7b4b4;
+  --neutral-bg: #2a2a2a;
+  --neutral-text: #cfcfcf;
+
+  /* 다크에서는 오션 툴바를 쓰지 않고 예전 기본 스킨의 평평한 툴바로 되돌린다. */
+  --toolbar-bg: var(--surface);
+  --toolbar-layers: none, none, none;
+  --toolbar-edge: var(--border);
+  --toolbar-inset: none;
+  --toolbar-padding: 6px 10px;
+  --toolbar-btn-text: var(--text);
+  --toolbar-btn-shadow: none;
+  --toolbar-btn-icon: var(--accent);
+  --toolbar-btn-icon-filter: none;
+  --toolbar-btn-hover-bg: var(--btn-bg);
+  --toolbar-btn-hover-border: var(--border);
+  --toolbar-btn-on-bg: var(--accent);
+  --toolbar-btn-on-border: var(--accent);
+  --toolbar-btn-on-text: #ffffff;
+  --toolbar-btn-on-icon: #ffffff;
+  --toolbar-btn-on-shift: none;
+  --toolbar-btn-ink: #ffffff;
+  --toolbar-divider: var(--border);
+}
+
+/* Optional background images applied without changing the original layout. */
+:root[data-skin="default"] body,
+:root[data-skin="default"] #app {
+  background-color: var(--bg);
+  background-image: var(--skin-app-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+/* 툴바 모양은 전부 위의 --toolbar-* 변수로 결정된다.
+   라이트는 오션 물결, 다크는 평평한 --surface 툴바로 값만 갈린다. */
+:root[data-skin="default"] body #app [data-ui="toolbar"] {
+  background-color: var(--toolbar-bg);
+  background-image: var(--skin-toolbar-background), var(--toolbar-layers);
+  background-position: var(--skin-background-position), left bottom, center, center;
+  background-size: var(--skin-background-size), 120px 14px, cover, cover;
+  background-repeat: no-repeat, repeat-x, no-repeat, no-repeat;
+  border-bottom: 1px solid var(--toolbar-edge);
+  box-shadow: var(--toolbar-inset);
+  padding: var(--toolbar-padding);
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] button {
+  --accent-contrast: var(--toolbar-btn-ink);
+  color: var(--toolbar-btn-text);
+  text-shadow: var(--toolbar-btn-shadow);
+  transition: background-color .12s ease, border-color .12s ease, transform .12s ease;
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] button svg {
+  color: var(--toolbar-btn-icon);
+  filter: var(--toolbar-btn-icon-filter);
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] button:hover:not(:disabled) {
+  background: var(--toolbar-btn-hover-bg);
+  border-color: var(--toolbar-btn-hover-border);
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] button:active:not(:disabled),
+:root[data-skin=default] body #app [data-ui=toolbar] button.active,
+:root[data-skin=default] body #app [data-ui=toolbar] button.active:hover:not(:disabled) {
+  background: var(--toolbar-btn-on-bg);
+  border-color: var(--toolbar-btn-on-border);
+  color: var(--toolbar-btn-on-text);
+  text-shadow: none;
+  transform: var(--toolbar-btn-on-shift);
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] button:active:not(:disabled) svg,
+:root[data-skin=default] body #app [data-ui=toolbar] button.active svg {
+  color: var(--toolbar-btn-on-icon);
+  filter: none;
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] button:active:not(:disabled),
+:root[data-skin=default] body #app [data-ui=toolbar] button.active {
+  --accent-contrast: #ffffff;
+}
+
+:root[data-skin=default] body #app [data-ui=toolbar] span.divider {
+  background: var(--toolbar-divider);
+}
+
+:root[data-skin="default"] body #app [data-ui="sidebar"],
+:root[data-skin="default"] body #app [data-ui="folder-tree"],
+:root[data-skin="default"] body #app [data-ui="preview-pane"] {
+  background-image: var(--skin-sidebar-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="file-table"],
+:root[data-skin="default"] body #app [data-ui="app-main"] {
+  background-image: var(--skin-content-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="empty-state"] {
+  background-image: var(--skin-empty-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}
+
+:root[data-skin="default"] body #app [data-ui="dialog-card"],
+:root[data-skin="default"] body #app [data-ui="compress-window"],
+:root[data-skin="default"] body #app [data-ui="extract-window"],
+:root[data-skin="default"] body #app [data-ui="settings-window"] {
+  background-image: var(--skin-dialog-background);
+  background-position: var(--skin-background-position);
+  background-size: var(--skin-background-size);
+  background-repeat: no-repeat;
+}

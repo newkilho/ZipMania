@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ZipMania",
+  "identifier": "net.kilho.zipmania",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "집매니아",
+        "width": 690,
+        "height": 600,
+        "minWidth": 690,
+        "minHeight": 420,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [],
+    "publisher": "Kilhonet",
+    "homepage": "https://kilho.net",
+    "copyright": "Copyright (C) 2026 Kilhonet",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "binaries/7z.dll": "7z.dll"
+    }
+  }
+}

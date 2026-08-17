@@ -1,0 +1,13 @@
+[package]
+name = "zipmania-i18n"
+version = "0.9.0"
+description = "ZipMania - UI 텍스트 정본과 생성기"
+edition = "2021"
+rust-version = "1.88"
+
+# 의존성 없음 — 정본을 읽는 쪽(앱)이 무엇을 쓰든 딸려 들어가지 않게
+[dependencies]
+
+[[bin]]
+name = "gen-strings"
+path = "src/bin/gen-strings.rs"

@@ -1,0 +1,54 @@
+/* Structural global rules. Visual values live in skin/<name>/skin.css. */
+:root {
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--window-border-active);
+}
+
+:root.win-inactive #app {
+  border-top-color: var(--window-border-inactive);
+}

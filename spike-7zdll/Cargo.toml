@@ -1,0 +1,17 @@
+# Isolated feasibility spike: call 7z.dll COM API from Rust (read path).
+# Independent from the ZipMania Tauri app. Empty [workspace] keeps it standalone
+# even if a parent Cargo.toml ever appears.
+[workspace]
+
+[package]
+name = "spike-7zdll"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+windows-core = "0.61"
+
+[[bin]]
+name = "spike"
+path = "src/main.rs"
