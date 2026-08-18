@@ -141,9 +141,10 @@
   // 선택 항목 없으면 선택된 파일 사용 불가 → 전체로 복원
   $: if (selectedCount === 0 && scope === "selected") scope = "all";
 
+  // 창 제목 = 현재 언어, Rust 초기 제목 덮어쓰기, 언어 변경 시 재적용
+  $: setCurrentWindowTitle($t("extract.windowTitle")).catch(() => {});
+
   onMount(async () => {
-    // 창 제목을 현재 언어로 설정(Rust 초기 제목 덮어쓰기)
-    setCurrentWindowTitle(get(t)("extract.windowTitle")).catch(() => {});
 
     // 리스너를 회수보다 먼저 단다(loadContext 는 IPC 여러 왕복), 표시만 남기고 처리는 언제나 아래 $:
     // 컴포넌트의 ready 와 다른 값(그쪽은 폴더 브라우저 준비)

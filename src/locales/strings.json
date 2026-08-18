@@ -74,6 +74,7 @@
       "progress.preparing": "준비 중…",
       "progress.done": "작업을 완료했습니다.",
       "progress.canceled": "작업을 취소했습니다.",
+      "app.name": "집매니아",
       "app.engineLoadFailed": "7z 로드 실패",
       "app.gutterTitle": "드래그해서 크기 조절",
       "app.assocBannerAsk": "{ext} 파일의 기본 앱을 집매니아로 변경하시겠습니까?",
@@ -271,8 +272,7 @@
       "shell.extract": "집매니아로 압축 풀기",
       "shell.open": "집매니아로 열기",
       "shell.extractEach": "각각 파일명 폴더에 풀기",
-      "assoc.typeName": "{ext} 압축 파일",
-      "assoc.appName": "집매니아"
+      "assoc.typeName": "{ext} 압축 파일"
     },
     "en": {
       "common.open": "Open",
@@ -337,6 +337,7 @@
       "progress.preparing": "Preparing…",
       "progress.done": "Task complete.",
       "progress.canceled": "Task canceled.",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "7z load failed",
       "app.gutterTitle": "Drag to resize",
       "app.assocBannerAsk": "Make ZipMania the default app for {ext} files?",
@@ -534,8 +535,7 @@
       "shell.extract": "Extract with ZipMania",
       "shell.open": "Open with ZipMania",
       "shell.extractEach": "Extract each to own folder",
-      "assoc.typeName": "{ext} Archive",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "{ext} Archive"
     },
     "ja": {
       "common.open": "開く",
@@ -600,6 +600,7 @@
       "progress.preparing": "準備中…",
       "progress.done": "処理が完了しました。",
       "progress.canceled": "処理を中止しました。",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "7z の読み込みに失敗",
       "app.gutterTitle": "ドラッグでサイズ変更",
       "app.assocBannerAsk": "{ext} ファイルの既定のアプリを ZipMania に変更しますか？",
@@ -797,8 +798,7 @@
       "shell.extract": "ZipMania で展開",
       "shell.open": "ZipMania で開く",
       "shell.extractEach": "それぞれ同名フォルダーに展開",
-      "assoc.typeName": "{ext} アーカイブ",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "{ext} アーカイブ"
     },
     "zh": {
       "common.open": "打开",
@@ -863,6 +863,7 @@
       "progress.preparing": "准备中…",
       "progress.done": "任务已完成。",
       "progress.canceled": "任务已取消。",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "7z 加载失败",
       "app.gutterTitle": "拖动以调整大小",
       "app.assocBannerAsk": "是否将 {ext} 文件的默认应用改为 ZipMania？",
@@ -1060,8 +1061,7 @@
       "shell.extract": "使用 ZipMania 解压",
       "shell.open": "使用 ZipMania 打开",
       "shell.extractEach": "分别解压到各自的同名文件夹",
-      "assoc.typeName": "{ext} 压缩文件",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "{ext} 压缩文件"
     },
     "ru": {
       "common.open": "Открыть",
@@ -1126,6 +1126,7 @@
       "progress.preparing": "Подготовка…",
       "progress.done": "Задача завершена.",
       "progress.canceled": "Задача отменена.",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "Не удалось загрузить 7z",
       "app.gutterTitle": "Потяните, чтобы изменить размер",
       "app.assocBannerAsk": "Сделать ZipMania приложением по умолчанию для файлов {ext}?",
@@ -1323,8 +1324,7 @@
       "shell.extract": "Извлечь с помощью ZipMania",
       "shell.open": "Открыть с помощью ZipMania",
       "shell.extractEach": "Извлечь каждый в свою папку",
-      "assoc.typeName": "Архив {ext}",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "Архив {ext}"
     },
     "it": {
       "common.open": "Apri",
@@ -1389,6 +1389,7 @@
       "progress.preparing": "Preparazione…",
       "progress.done": "Operazione completata.",
       "progress.canceled": "Operazione annullata.",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "Caricamento di 7z non riuscito",
       "app.gutterTitle": "Trascina per ridimensionare",
       "app.assocBannerAsk": "Vuoi impostare ZipMania come app predefinita per i file {ext}?",
@@ -1586,8 +1587,7 @@
       "shell.extract": "Estrai con ZipMania",
       "shell.open": "Apri con ZipMania",
       "shell.extractEach": "Estrai ciascuno nella propria cartella",
-      "assoc.typeName": "Archivio {ext}",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "Archivio {ext}"
     },
     "fr": {
       "common.open": "Ouvrir",
@@ -1652,6 +1652,7 @@
       "progress.preparing": "Préparation…",
       "progress.done": "Tâche terminée.",
       "progress.canceled": "Tâche annulée.",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "Échec du chargement de 7z",
       "app.gutterTitle": "Faire glisser pour redimensionner",
       "app.assocBannerAsk": "Définir ZipMania comme application par défaut pour les fichiers {ext} ?",
@@ -1849,8 +1850,7 @@
       "shell.extract": "Extraire avec ZipMania",
       "shell.open": "Ouvrir avec ZipMania",
       "shell.extractEach": "Extraire chacun dans son dossier",
-      "assoc.typeName": "Archive {ext}",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "Archive {ext}"
     },
     "es": {
       "common.open": "Abrir",
@@ -1915,6 +1915,7 @@
       "progress.preparing": "Preparando…",
       "progress.done": "Tarea completada.",
       "progress.canceled": "Tarea cancelada.",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "Error al cargar 7z",
       "app.gutterTitle": "Arrastra para cambiar el tamaño",
       "app.assocBannerAsk": "¿Quieres que ZipMania sea la aplicación predeterminada para los archivos {ext}?",
@@ -2112,8 +2113,7 @@
       "shell.extract": "Extraer con ZipMania",
       "shell.open": "Abrir con ZipMania",
       "shell.extractEach": "Extraer cada uno en su carpeta",
-      "assoc.typeName": "Archivo {ext}",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "Archivo {ext}"
     },
     "ar": {
       "common.open": "فتح",
@@ -2178,6 +2178,7 @@
       "progress.preparing": "جارٍ التحضير…",
       "progress.done": "اكتملت المهمة.",
       "progress.canceled": "تم إلغاء المهمة.",
+      "app.name": "ZipMania",
       "app.engineLoadFailed": "فشل تحميل 7z",
       "app.gutterTitle": "اسحب لتغيير الحجم",
       "app.assocBannerAsk": "هل تريد جعل ZipMania التطبيق الافتراضي لملفات {ext}؟",
@@ -2375,8 +2376,7 @@
       "shell.extract": "استخراج باستخدام ZipMania",
       "shell.open": "فتح باستخدام ZipMania",
       "shell.extractEach": "استخراج كل عنصر إلى مجلد باسمه",
-      "assoc.typeName": "أرشيف {ext}",
-      "assoc.appName": "ZipMania"
+      "assoc.typeName": "أرشيف {ext}"
     }
   }
 }

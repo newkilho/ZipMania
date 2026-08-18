@@ -7,7 +7,7 @@
 /// 연결 대상 확장자 정본, 환경설정 목록 + 설치 시 기본값, 사본 = SettingsWindow.svelte 의 ASSOC_EXTS
 /// READ_EXTS 와 다른 목록
 pub const DEFAULT_ASSOC_EXTS: &[&str] =
-    &["zip", "7z", "rar", "tar", "gz", "bz2", "xz", "egg", "alz", "cbz"];
+    &["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "egg", "alz", "cbz"];
 
 /// 확장자 → ProgID(ZipMania.zip)
 fn prog_id(ext: &str) -> String {
@@ -33,7 +33,7 @@ fn type_name(ext: &str, lang: &str) -> String {
 
 /// [기본 앱 선택] 창(IAssocHandler::GetUIName)이 보는 앱 이름, 등록 시점 언어로 고정(F)
 fn app_name(lang: &str) -> String {
-    zipmania_i18n::text("assoc.appName", lang).into()
+    zipmania_i18n::text("app.name", lang).into()
 }
 
 // ── Windows 구현 ─────────────────────────────────────────────────────────────

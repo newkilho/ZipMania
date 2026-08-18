@@ -706,6 +706,17 @@ pub const STRINGS: &[(&str, [&str; 9])] = &[
         "تم إلغاء المهمة.",
     ]),
     // ── app ─────────────────────────────────────────────────────────
+    ("app.name", [
+        "집매니아",
+        "ZipMania",
+        "ZipMania",
+        "ZipMania",
+        "ZipMania",
+        "ZipMania",
+        "ZipMania",
+        "ZipMania",
+        "ZipMania",
+    ]),
     ("app.engineLoadFailed", [
         "7z 로드 실패",
         "7z load failed",
@@ -2894,17 +2905,5 @@ pub const STRINGS: &[(&str, [&str; 9])] = &[
         "Archive {ext}",
         "Archivo {ext}",
         "أرشيف {ext}",
-    ]),
-    // ── assoc ───────────────────────────────────────────────────────
-    ("assoc.appName", [
-        "집매니아",
-        "ZipMania",
-        "ZipMania",
-        "ZipMania",
-        "ZipMania",
-        "ZipMania",
-        "ZipMania",
-        "ZipMania",
-        "ZipMania",
     ]),
 ];

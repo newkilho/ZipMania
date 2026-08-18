@@ -34,7 +34,7 @@
   /**
    * 파일 연결 노출 확장자, Rust DEFAULT_ASSOC_EXTS 의 유일한 사본, 테스트가 대조, READ_EXTS 부분집합
    */
-  const ASSOC_EXTS = ["zip", "7z", "rar", "tar", "gz", "bz2", "xz", "egg", "alz", "cbz"];
+  const ASSOC_EXTS = ["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "egg", "alz", "cbz"];
 
   const THEMES = [
     { value: "system", labelKey: "settings.themeSystem" },
@@ -59,8 +59,10 @@
   let loaded = false;
   let error = "";
 
+  // 창 제목 = 현재 언어, Rust 초기 제목 덮어쓰기, 언어 변경 시 재적용
+  $: setCurrentWindowTitle($t("settings.title")).catch(() => {});
+
   onMount(async () => {
-    setCurrentWindowTitle(get(t)("settings.title")).catch(() => {});
     try {
       apply(await getSettings());
     } catch (e) {

@@ -1317,7 +1317,7 @@ fn open_compress_window_inner(
         "compress",
         WebviewUrl::App("index.html".into()),
     )
-    .title("새 압축")
+    .title(zipmania_i18n::text("compress.windowTitle", &crate::update::language(&app)))
     // 단일 열 폼, 세로 620 유지
     .inner_size(680.0, 620.0)
     .min_inner_size(560.0, 620.0)
@@ -1585,7 +1585,7 @@ pub async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         "settings",
         WebviewUrl::App("index.html".into()),
     )
-    .title("환경설정")
+    .title(zipmania_i18n::text("settings.title", &crate::update::language(&app)))
     .inner_size(720.0, 520.0)
     .min_inner_size(620.0, 460.0)
     .center()
@@ -1657,7 +1657,7 @@ pub async fn open_extract_window(
         "extract",
         WebviewUrl::App("index.html".into()),
     )
-    .title("압축 풀기")
+    .title(zipmania_i18n::text("extract.windowTitle", &crate::update::language(&app)))
     // 인라인 폴더 트리 포함 → 크게 연다
     .inner_size(640.0, 600.0)
     .min_inner_size(560.0, 520.0)
@@ -1725,7 +1725,7 @@ pub(crate) async fn open_viewer_window(app: &tauri::AppHandle, path: String) -> 
     let title = std::path::Path::new(&path)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "집매니아".into());
+        .unwrap_or_else(|| zipmania_i18n::text("app.name", &crate::update::language(app)).to_string());
 
     // 세션은 build 보다 먼저 발급 — 창이 곧바로 보내는 IPC 가 label 로 떨어지지 않게
     let session = app.state::<WindowSessions>().begin(&label);

@@ -9,6 +9,7 @@
     onOpenArchive,
     takeStartupOpen,
     takeViewerArchive,
+    setCurrentWindowTitle,
   } from "./lib/api.js";
   import { t } from "./lib/i18n.js";
   import {
@@ -38,6 +39,12 @@
 
   // 파일 연결 안내는 메인 창 전용, 뷰어 창(viewer-N)도 이 컴포넌트 사용
   const isMainWindow = currentWindowLabel() === "main";
+
+  // 메인 창 제목 = 현재 언어의 앱 이름, 언어 변경 시 재적용
+  // 뷰어 창(viewer-N)은 제목이 아카이브 파일명이라 제외
+  $: if (!preview && isMainWindow) {
+    setCurrentWindowTitle($t("app.name")).catch(() => {});
+  }
 
   // WebView 기본 우클릭 메뉴 차단, 목록, 트리는 각자 시스템 네이티브 메뉴를 띄운다
   function onGlobalContextMenu(e) {

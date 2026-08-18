@@ -22,6 +22,11 @@ target
 *.sln
 *.sw?
 
+# 빌드 시점 설정, 절대 커밋 금지 — 견본은 .env.example
+.env
+.env.*
+!.env.example
+
 # 내 맘
 *.bat
 

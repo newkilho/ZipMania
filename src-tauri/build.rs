@@ -5,12 +5,56 @@ fn main() {
     // tauri-build 는 아이콘 변경만으로 재실행 안 됨 → 옛 아이콘 박힘
     println!("cargo:rerun-if-changed=icons/icon.ico");
 
+    export_build_env();
+
     let rc = assoc_icons_rc();
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .windows_attributes(tauri_build::WindowsAttributes::new().append_rc_content(rc)),
     )
     .expect("tauri 빌드 실패");
+}
+
+/// 저장소 루트 .env → 컴파일 시점 환경 변수, 프로세스 환경이 있으면 그것이 이김(CI 재정의)
+fn export_build_env() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join(".env");
+    println!("cargo:rerun-if-changed={}", path.display());
+    println!("cargo:rerun-if-env-changed=UPDATE_URL");
+
+    let value = std::env::var("UPDATE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| dotenv_value(&path, "UPDATE_URL"))
+        .unwrap_or_else(|| {
+            panic!("UPDATE_URL 이 없습니다. {} 에 넣거나 환경 변수로 주십시오", path.display())
+        });
+
+    // 오타는 여기서 잡는다, 실행 시점에 잡으면 이미 배포된 뒤
+    if !(value.starts_with("https://") || value.starts_with("http://")) {
+        panic!("UPDATE_URL 은 전체 URL(https://...)이어야 합니다: {value:?}");
+    }
+    println!("cargo:rustc-env=UPDATE_URL={value}");
+}
+
+/// .env 에서 KEY=VALUE 하나, # 주석과 빈 줄 무시, 값의 감싼 따옴표 제거
+fn dotenv_value(path: &Path, key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((k, v)) = line.split_once('=') else { continue };
+        if k.trim() != key {
+            continue;
+        }
+        let v = v.trim();
+        let v = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(v);
+        let v = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')).unwrap_or(v);
+        return Some(v.to_string());
+    }
+    None
 }
 
 /// icon/ 폴더 → exe 아이콘 리소스, .rc 조각 + Rust 조회표 동시 생성, ID 는 이름순

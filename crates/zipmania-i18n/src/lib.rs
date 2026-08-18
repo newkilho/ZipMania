@@ -223,7 +223,13 @@ mod tests {
     /// Rust 코드가 부르는 키가 빠지면 화면에 키 문자열이 나온다
     #[test]
     fn 코드가_쓰는_키가_표에_있다() {
-        for key in ["assoc.typeName", "assoc.appName"] {
+        for key in [
+            "assoc.typeName",
+            "app.name",
+            "compress.windowTitle",
+            "extract.windowTitle",
+            "settings.title",
+        ] {
             assert!(
                 STRINGS.iter().any(|(k, _)| *k == key),
                 "{key} 가 표에 없다"

@@ -155,9 +155,10 @@
     addInputs(queued);
   }
 
+  // 창 제목 = 현재 언어, Rust 초기 제목 덮어쓰기, 언어 변경 시 재적용
+  $: setCurrentWindowTitle($t("compress.windowTitle")).catch(() => {});
+
   onMount(async () => {
-    // 창 제목을 현재 언어로 설정(Rust 초기 제목 덮어쓰기)
-    setCurrentWindowTitle(get(t)("compress.windowTitle")).catch(() => {});
     // 리스너를 회수보다 먼저 단다(회수는 IPC 왕복), 초기화 전이므로 기억만 해 둔다
     unlistenAdd = await onCompressTakeInputs(() => {
       coord.signal();

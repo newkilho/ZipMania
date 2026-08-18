@@ -6,8 +6,8 @@ use std::sync::Mutex;
 
 use tauri::{Emitter, Manager};
 
-/// ZipMania 전용 조회 주소, 앱마다 다르다 — 없는 앱은 서버가 404 를 낸다
-const UPDATE_URL: &str = "https://report.kilho.net/status/zipmania";
+/// 조회 주소, 저장소 루트 .env 의 UPDATE_URL 을 build.rs 가 박는다, 앱마다 다름
+const UPDATE_URL: &str = env!("UPDATE_URL");
 
 /// 상태줄 배지에 실어 보내는 정보
 #[derive(Clone, serde::Serialize)]
@@ -99,7 +99,7 @@ fn ask(
     let text = klib_update::text::dialog(lang);
 
     let mut dialog = klib_dialog::Dialog {
-        title: "ZipMania",
+        title: zipmania_i18n::text("app.name", lang),
         instruction: text.instruction,
         content: text.content,
         icon: klib_dialog::Icon::Warning,

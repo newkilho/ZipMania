@@ -1,0 +1,15 @@
+﻿       
+                ZipMania, Copyright (c) 2026 Kilho.net
+
+
+  • An archive manager that handles a wide range of archives quickly and easily.
+
+    -  Opens a wide range of archive formats, including ZIP, RAR, 7Z, EGG, ALZ, and ISO.
+    -  Previews images and text without extracting the archive.
+    -  Uses a dedicated ZIP engine for fast compression and extraction.
+    -  Supports password protection, filename encryption, and split archives.
+    -  Compresses and extracts files directly from the Windows Explorer context menu.
+    -  Free to use with no ads or bundled software.
+
+    - Feel free to use it at work, at home, in government offices, at school, etc.
+    - The program is freeware.
