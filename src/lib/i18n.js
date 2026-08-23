@@ -16,8 +16,8 @@ export const LANGUAGES = strings.langs;
 /** 언어 코드 → 평면 키 사전, */
 const DICTS = strings.strings;
 
-/** 누락 키를 채우는 참조(완전) 언어, 정본의 첫 언어, */
-const REFERENCE = LANGUAGES[0].code;
+/** 누락 키를 채우는 폴백 언어, 정본의 두 번째 언어(en), 한국어 누출 금지 */
+const FALLBACK = LANGUAGES[1].code;
 /** 기본 언어 — 시스템 언어 미감지 시 영어로 시작 */
 const DEFAULT = "en";
 
@@ -74,8 +74,8 @@ function interpolate(str, params) {
  * 현재 언어에 묶인 번역 함수, $t(키) 또는 $t(키, { pct: 42 }), 없는 키는 참조 언어 → 키 문자열
  */
 export const t = derived(locale, ($locale) => {
-  const dict = DICTS[$locale] || DICTS[REFERENCE];
-  const ref = DICTS[REFERENCE];
+  const dict = DICTS[$locale] || DICTS[FALLBACK];
+  const ref = DICTS[FALLBACK];
   return (key, params) => {
     let val = lookup(dict, key);
     if (val == null) val = lookup(ref, key);

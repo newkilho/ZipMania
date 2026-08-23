@@ -22,15 +22,18 @@ use crate::error::{self, ZipManiaError};
 use crate::models::{ArchiveEntry, ScanEntry, TestEntry};
 
 use callbacks::{ExtractCfg, ProgressSink, ScanFn, UpdateCfg, UpdateItem};
-use crate::inputs::summarize;
 use crate::outfile::reserve_tmp;
 use com::*;
 use ffi::Dll;
 
 use super::{
     ArchiveBackend, CreateOptions, CreateResult, EditOptions, ExtractOptions, ExtractResult,
-    ProgressFn,
+    MissingItem, MissingReason, ProgressFn,
 };
+
+// 진행률 타입은 테스트 클로저에서만 직접 쓴다(본체는 ProgressSink 경유)
+#[cfg(test)]
+use super::Progress;
 
 // 엔진 중립 옵션, 상수 = crate::formats, 기존 경로 호환용 재노출
 pub use crate::formats::{CompressFormat, OverwriteMode, READ_EXTS};
@@ -463,11 +466,7 @@ fn do_extract(
     shared.settle_pending();
 
     if shared.aborted.load(std::sync::atomic::Ordering::SeqCst) {
-        return ExtractResult::Done {
-            status: "canceled",
-            message: "작업을 취소했습니다. 이미 해제된 일부 파일이 대상 폴더에 남아 있을 수 있습니다."
-                .to_string(),
-        };
+        return ExtractResult::canceled();
     }
 
     let op = *shared.op_result.lock().unwrap();
@@ -496,42 +495,19 @@ fn do_extract(
         ));
     }
     // 빠진 항목 있으면 ok 아님 — 앱이 ok 를 보고 [해제 후 원본 삭제] 수행
-    let unsafe_paths = shared.unsafe_paths.lock().unwrap();
-    let failed_paths = shared.failed_paths.lock().unwrap();
-    if !unsafe_paths.is_empty() || !failed_paths.is_empty() {
-        let mut parts = Vec::new();
-        if !unsafe_paths.is_empty() {
-            parts.push(format!(
-                "대상 폴더 밖을 가리키는 항목 {}개를 건너뛰었습니다({})",
-                unsafe_paths.len(),
-                summarize(&unsafe_paths.iter().cloned().collect::<Vec<_>>())
-            ));
-        }
-        if !failed_paths.is_empty() {
-            parts.push(format!(
-                "파일 {}개를 쓰지 못했습니다({})",
-                failed_paths.len(),
-                summarize(
-                    &failed_paths
-                        .iter()
-                        .map(|(p, why)| format!("{p}: {why}"))
-                        .collect::<Vec<_>>()
-                )
-            ));
-        }
-        return ExtractResult::Done {
-            status: "warning",
-            message: format!("해제를 마쳤지만 일부 항목이 빠졌습니다. {}.", parts.join(" / ")),
-        };
-    }
-    ExtractResult::Done {
-        status: "ok",
-        message: "해제를 완료했습니다.".to_string(),
-    }
+    let mut missing: Vec<MissingItem> = shared
+        .unsafe_paths
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|p| MissingItem::new(p, MissingReason::UnsafePath))
+        .collect();
+    missing.extend(shared.failed_paths.lock().unwrap().drain(..));
+    ExtractResult::finish(missing)
 }
 
 /// crate::inputs 결과 → 7z 항목, 시각 → FILETIME, keep_index = None(신규)
-fn collect_items(inputs: &[String]) -> (Vec<UpdateItem>, Vec<String>) {
+fn collect_items(inputs: &[String]) -> (Vec<UpdateItem>, Vec<MissingItem>) {
     let (found, skipped) = crate::inputs::collect(inputs);
     let items = found
         .into_iter()
@@ -664,10 +640,7 @@ fn do_create(
 
     if shared.aborted.load(std::sync::atomic::Ordering::SeqCst) {
         let _ = std::fs::remove_file(&tmp_path);
-        return CreateResult::Done {
-            status: "canceled",
-            message: "압축을 취소했습니다. 생성 중이던 아카이브 파일은 삭제했습니다.".to_string(),
-        };
+        return CreateResult::canceled();
     }
 
     let op = *shared.op_result.lock().unwrap();
@@ -690,20 +663,7 @@ fn do_create(
         return CreateResult::Failed(e);
     }
     // 담지 못한 항목 있으면 ok 아님
-    if !skipped.is_empty() {
-        return CreateResult::Done {
-            status: "warning",
-            message: format!(
-                "압축을 마쳤지만 {}개 항목을 담지 못했습니다: {}",
-                skipped.len(),
-                summarize(&skipped)
-            ),
-        };
-    }
-    CreateResult::Done {
-        status: "ok",
-        message: "압축을 완료했습니다.".to_string(),
-    }
+    CreateResult::finish(skipped)
 }
 
 /// 아카이브 편집, IInArchive → 같은 핸들러 IOutArchive 캐스팅 → UpdateItems
@@ -825,10 +785,7 @@ fn do_edit(
 
     if shared.aborted.load(std::sync::atomic::Ordering::SeqCst) {
         let _ = std::fs::remove_file(&tmp_path);
-        return CreateResult::Done {
-            status: "canceled",
-            message: "편집을 취소했습니다.".to_string(),
-        };
+        return CreateResult::canceled();
     }
 
     let op = *shared.op_result.lock().unwrap();
@@ -852,20 +809,7 @@ fn do_edit(
         return CreateResult::Failed(e);
     }
 
-    if !skipped.is_empty() {
-        return CreateResult::Done {
-            status: "warning",
-            message: format!(
-                "편집을 마쳤지만 {}개 항목을 담지 못했습니다: {}",
-                skipped.len(),
-                summarize(&skipped)
-            ),
-        };
-    }
-    CreateResult::Done {
-        status: "ok",
-        message: "편집을 완료했습니다.".to_string(),
-    }
+    CreateResult::finish(skipped)
 }
 
 /// 무결성 테스트
@@ -1317,10 +1261,10 @@ fn do_extract_entry_to_file(
     // 성공 → 임시 파일 이동, 오류 경로에서는 미호출 → Drop 이 정리
     shared.settle_pending();
     // 옮기지 못한 것 = 실패, failed_paths 확인 필수
-    if let Some((path, why)) = shared.failed_paths.lock().unwrap().first() {
+    if let Some(m) = shared.failed_paths.lock().unwrap().first() {
         return Err(ZipManiaError::new(
             "output_error",
-            format!("항목을 제자리에 놓지 못했습니다({path}): {why}"),
+            format!("항목을 제자리에 놓지 못했습니다({}): {:?}", m.path, m.reason),
         ));
     }
     Ok(())
@@ -1726,7 +1670,7 @@ mod integration_tests {
 
     fn extract_all(archive: &Path, dest: &Path, keep: bool, ow: OverwriteMode) -> ExtractResult {
         let cancel = Arc::new(AtomicBool::new(false));
-        backend().extract(&extract_opts(archive, dest, keep, ow), &mut |_p, _f| {}, cancel)
+        backend().extract(&extract_opts(archive, dest, keep, ow), &mut |_p| {}, cancel)
     }
 
     // ── (a) DLL 읽기 경로를 7z.exe 산출물로 검증 ──
@@ -1808,7 +1752,7 @@ mod integration_tests {
         let mut opts = extract_opts(&archive, &out, true, OverwriteMode::Overwrite);
         opts.selected = vec!["사진".to_string()];
         let cancel = Arc::new(AtomicBool::new(false));
-        let r = backend().extract(&opts, &mut |_p, _f| {}, cancel);
+        let r = backend().extract(&opts, &mut |_p| {}, cancel);
         assert!(matches!(r, ExtractResult::Done { status: "ok", .. }));
 
         assert!(out.join("사진").join("가을.jpg").exists());
@@ -1850,13 +1794,13 @@ mod integration_tests {
         // 틀린 암호
         let mut opts = extract_opts(&archive, &td.path.join("w"), true, OverwriteMode::Overwrite);
         opts.password = Some("틀린암호".to_string());
-        match backend().extract(&opts, &mut |_p, _f| {}, Arc::new(AtomicBool::new(false))) {
+        match backend().extract(&opts, &mut |_p| {}, Arc::new(AtomicBool::new(false))) {
             ExtractResult::Failed(e) => assert_eq!(e.code, "wrong_password", "err={e:?}"),
             ExtractResult::Done { status, .. } => panic!("틀린암호인데 완료: {status}"),
         }
         // 무암호
         let opts_n = extract_opts(&archive, &td.path.join("n"), true, OverwriteMode::Overwrite);
-        match backend().extract(&opts_n, &mut |_p, _f| {}, Arc::new(AtomicBool::new(false))) {
+        match backend().extract(&opts_n, &mut |_p| {}, Arc::new(AtomicBool::new(false))) {
             ExtractResult::Failed(e) => assert_eq!(e.code, "password_required", "err={e:?}"),
             ExtractResult::Done { status, .. } => panic!("무암호인데 완료: {status}"),
         }
@@ -1864,7 +1808,7 @@ mod integration_tests {
         let mut opts_ok = extract_opts(&archive, &td.path.join("ok"), true, OverwriteMode::Overwrite);
         opts_ok.password = Some("zipmaniaKey1".to_string());
         assert!(matches!(
-            backend().extract(&opts_ok, &mut |_p, _f| {}, Arc::new(AtomicBool::new(false))),
+            backend().extract(&opts_ok, &mut |_p| {}, Arc::new(AtomicBool::new(false))),
             ExtractResult::Done { .. }
         ));
         assert_eq!(fs::read_to_string(td.path.join("ok").join("secret.txt")).unwrap(), "top secret");
@@ -1916,7 +1860,7 @@ mod integration_tests {
                 password: None,
                 selected: vec![],
             };
-            backend().extract(&opts, &mut move |_p, _f| {
+            backend().extract(&opts, &mut move |_p| {
                 started_cb.store(true, Ordering::SeqCst);
             }, cancel_run)
         });
@@ -1947,7 +1891,7 @@ mod integration_tests {
     }
     fn create(out: &Path, inputs: &[String], fmt: CompressFormat, level: u8, pw: Option<&str>, enc: bool) -> CreateResult {
         let cancel = Arc::new(AtomicBool::new(false));
-        backend().create(&create_opts(out, inputs, fmt, level, pw, enc), &mut |_p, _f| {}, cancel)
+        backend().create(&create_opts(out, inputs, fmt, level, pw, enc), &mut |_p| {}, cancel)
     }
 
     #[test]
@@ -2027,7 +1971,7 @@ mod integration_tests {
         // 틀린 암호 해제 → wrong_password
         let mut w = extract_opts(&out, &td.path.join("w"), true, OverwriteMode::Overwrite);
         w.password = Some("틀린암호".to_string());
-        match backend().extract(&w, &mut |_p, _f| {}, Arc::new(AtomicBool::new(false))) {
+        match backend().extract(&w, &mut |_p| {}, Arc::new(AtomicBool::new(false))) {
             ExtractResult::Failed(e) => assert_eq!(e.code, "wrong_password", "err={e:?}"),
             ExtractResult::Done { status, .. } => panic!("틀린암호인데 완료: {status}"),
         }
@@ -2035,7 +1979,7 @@ mod integration_tests {
         let mut ok = extract_opts(&out, &td.path.join("ok"), true, OverwriteMode::Overwrite);
         ok.password = Some("zipmaniaKey1".to_string());
         assert!(matches!(
-            backend().extract(&ok, &mut |_p, _f| {}, Arc::new(AtomicBool::new(false))),
+            backend().extract(&ok, &mut |_p| {}, Arc::new(AtomicBool::new(false))),
             ExtractResult::Done { .. }
         ));
         assert_eq!(fs::read_to_string(td.path.join("ok").join("비밀.txt")).unwrap(), "top secret 내용");
@@ -2120,7 +2064,7 @@ mod integration_tests {
                 password: None,
                 encrypt_names: false,
             };
-            backend().create(&opts, &mut move |_p, _f| {
+            backend().create(&opts, &mut move |_p| {
                 started_cb.store(true, Ordering::SeqCst);
             }, cancel_run)
         });
@@ -2156,7 +2100,7 @@ mod integration_tests {
         };
         // 없는 DLL → sz.load() 실패
         let broken = SevenZip::new(td.path.join("없는7z.dll"));
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         match broken.create(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
             CreateResult::Failed(_) => {}
             CreateResult::Done { status, .. } => panic!("실패해야 하는데 {status}"),
@@ -2210,7 +2154,7 @@ mod integration_tests {
             };
             backend().create(
                 &opts,
-                &mut move |_p, _f| {
+                &mut move |_p| {
                     started_cb.store(true, Ordering::SeqCst);
                 },
                 cancel_run,
@@ -2251,7 +2195,7 @@ mod integration_tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let flip = Arc::clone(&cancel);
         let seen = std::cell::Cell::new(0u32);
-        let mut prog = move |_p: u8, _f: Option<String>| {
+        let mut prog = move |_p: Progress| {
             seen.set(seen.get() + 1);
             if seen.get() >= 3 {
                 flip.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -2316,7 +2260,7 @@ mod integration_tests {
             password: None,
             encrypt_names: false,
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         match backend().create(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
             CreateResult::Done { status, .. } => assert_eq!(status, "ok"),
             CreateResult::Failed(e) => panic!("압축 실패: {}", e.message),
@@ -2356,13 +2300,16 @@ mod integration_tests {
             password: None,
             encrypt_names: false,
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         // 링크 추적 시 미종료 또는 외부 파일 유입
         let r = backend().create(&opts, &mut prog, Arc::new(AtomicBool::new(false)));
         match r {
-            CreateResult::Done { status, message } => {
-                assert_eq!(status, "warning", "건너뛴 링크를 알리지 않는다: {message}");
-                assert!(message.contains("링크"), "{message}");
+            CreateResult::Done { status, missing, .. } => {
+                assert_eq!(status, "warning", "건너뛴 링크를 알리지 않는다: {missing:?}");
+                assert!(
+                    missing.iter().any(|m| m.reason == MissingReason::Link),
+                    "{missing:?}"
+                );
             }
             CreateResult::Failed(e) => panic!("압축 실패: {}", e.message),
         }
@@ -2403,7 +2350,7 @@ mod integration_tests {
             remove: Vec::new(),
             password: None,
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         let _ = backend().edit(&opts, &mut prog, Arc::new(AtomicBool::new(false)));
 
         assert_eq!(fs::read(&archive).unwrap(), before, "편집 실패로 원본이 바뀌었다");
@@ -2475,7 +2422,7 @@ mod single_stream_tests {
             selected: Vec::new(),
             decisions: Default::default(),
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         SevenZip::new(bin("7z.dll")).extract(&opts, &mut prog, Arc::new(AtomicBool::new(false)))
     }
 
@@ -2501,7 +2448,9 @@ mod single_stream_tests {
         let dest = dir.join("out");
         fs::create_dir_all(&dest).unwrap();
         match extract_to(&arc, &dest) {
-            ExtractResult::Done { status, message } => eprintln!("[{tag}] 해제 = {status} / {message}"),
+            ExtractResult::Done { status, missing, .. } => {
+                eprintln!("[{tag}] 해제 = {status} / {missing:?}")
+            }
             ExtractResult::Failed(e) => panic!("[{tag}] 해제 실패: {} {}", e.code, e.message),
         }
         let produced: Vec<String> = fs::read_dir(&dest)
@@ -2627,7 +2576,7 @@ mod conflict_tests {
                 .map(|(k, v)| (k.to_string(), *v))
                 .collect(),
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         match SevenZip::new(bin("7z.dll")).extract(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
             ExtractResult::Done { .. } => {}
             ExtractResult::Failed(e) => panic!("해제 실패: {} {}", e.code, e.message),
@@ -2807,7 +2756,7 @@ mod zip_slip_tests {
             selected: Vec::new(),
             decisions: Default::default(),
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         let r = SevenZip::new(dll()).extract(&opts, &mut prog, Arc::new(AtomicBool::new(false)));
         assert!(!sentinel.exists(), "해제 폴더 밖에 파일이 생겼다: {}", sentinel.display());
         assert!(!Path::new(r"C:\탈출.txt").exists(), "드라이브 루트에 파일이 생겼다");
@@ -2821,11 +2770,12 @@ mod zip_slip_tests {
         assert!(out.join("탈출.txt").is_file(), "절대경로 항목이 대상 폴더 안에 풀리지 않았다");
         // .. 항목 3개 건너뜀 → 빠진 항목 있음 → warning
         match r {
-            ExtractResult::Done { status, message } => {
-                assert_eq!(status, "warning", "빠진 항목이 있는데 ok 로 보고한다: {message}");
-                assert!(
-                    message.contains("항목 3개"),
-                    "건너뛴 항목을 알리지 않는다: {message}"
+            ExtractResult::Done { status, missing, .. } => {
+                assert_eq!(status, "warning", "빠진 항목이 있는데 ok 로 보고한다: {missing:?}");
+                assert_eq!(
+                    missing.iter().filter(|m| m.reason == MissingReason::UnsafePath).count(),
+                    3,
+                    "건너뛴 항목을 알리지 않는다: {missing:?}"
                 );
             }
             ExtractResult::Failed(e) => panic!("해제가 실패했다: {}", e.message),
@@ -2855,7 +2805,7 @@ mod zip_slip_tests {
             selected: Vec::new(),
             decisions: Default::default(),
         };
-        let mut prog = |_p: u8, _f: Option<String>| {};
+        let mut prog = |_p: Progress| {};
         let _ = SevenZip::new(dll()).extract(&opts, &mut prog, Arc::new(AtomicBool::new(false)));
 
         assert!(!dir.join("탈출.txt").exists(), "해제 폴더 밖에 파일이 생겼다");

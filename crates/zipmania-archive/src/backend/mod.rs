@@ -39,11 +39,83 @@ pub struct CreateOptions {
     pub encrypt_names: bool,
 }
 
+/// 누락 사유, 프런트가 missing.<reason> 으로 번역, 사람이 읽을 문장 미포함
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MissingReason {
+    UnsafePath,
+    SizeMismatch,
+    CreateDir,
+    CreateFile,
+    Write,
+    Commit,
+    Read,
+    Link,
+    Stat,
+    DirRead,
+    EntryRead,
+    Missing,
+    Unnamed,
+}
+
+/// 산출물에 담기지 못한 항목 하나, detail = OS 오류 원문/보조 숫자(번역 대상 아님)
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingItem {
+    pub path: String,
+    pub reason: MissingReason,
+    pub detail: Option<String>,
+}
+
+impl MissingItem {
+    /// 사유만 있는 항목
+    pub fn new(path: impl Into<String>, reason: MissingReason) -> Self {
+        MissingItem { path: path.into(), reason, detail: None }
+    }
+
+    /// 사유 + 보조 문자열(OS 오류 원문 등)
+    pub fn detailed(
+        path: impl Into<String>,
+        reason: MissingReason,
+        detail: impl Into<String>,
+    ) -> Self {
+        MissingItem { path: path.into(), reason, detail: Some(detail.into()) }
+    }
+}
+
+/// 이벤트에 싣는 누락 목록 상한, 넘는 만큼은 missing_total 로만 보고 (D3.6)
+pub const MISSING_CAP: usize = 50;
+
+/// 누락 목록 → (상한만큼 자른 목록, 자르기 전 개수)
+fn cap_missing(mut missing: Vec<MissingItem>) -> (Vec<MissingItem>, usize) {
+    let total = missing.len();
+    missing.truncate(MISSING_CAP);
+    (missing, total)
+}
+
 /// 해제 결과, 앱이 job:done / job:error 로 변환
 pub enum ExtractResult {
-    /// status = ok / warning(항목이 빠짐) / canceled
-    Done { status: &'static str, message: String },
+    /// status = ok / warning(항목이 빠짐) / canceled, missing 이 비지 않으면 반드시 warning
+    Done {
+        status: &'static str,
+        missing: Vec<MissingItem>,
+        missing_total: usize,
+    },
     Failed(ZipManiaError),
+}
+
+impl ExtractResult {
+    /// 누락 유무로 ok/warning 판정, 상한 적용
+    pub fn finish(missing: Vec<MissingItem>) -> Self {
+        let status = if missing.is_empty() { "ok" } else { "warning" };
+        let (missing, missing_total) = cap_missing(missing);
+        ExtractResult::Done { status, missing, missing_total }
+    }
+
+    /// 취소 마감
+    pub fn canceled() -> Self {
+        ExtractResult::Done { status: "canceled", missing: Vec::new(), missing_total: 0 }
+    }
 }
 
 /// 아카이브 편집 옵션, 항목 추가/삭제
@@ -57,13 +129,58 @@ pub struct EditOptions {
 
 /// 압축 결과, 앱이 job:done / job:error 로 변환
 pub enum CreateResult {
-    /// status = ok / warning(항목이 빠짐) / canceled
-    Done { status: &'static str, message: String },
+    /// status = ok / warning(항목이 빠짐) / canceled, missing 이 비지 않으면 반드시 warning
+    Done {
+        status: &'static str,
+        missing: Vec<MissingItem>,
+        missing_total: usize,
+    },
     Failed(ZipManiaError),
 }
 
-/// (percent 0~100, 현재 파일명), 제네릭 아닌 트레이트 객체 = dyn ArchiveBackend 객체 안전성
-pub type ProgressFn<'a> = dyn FnMut(u8, Option<String>) + 'a;
+impl CreateResult {
+    /// 누락 유무로 ok/warning 판정, 상한 적용
+    pub fn finish(missing: Vec<MissingItem>) -> Self {
+        let status = if missing.is_empty() { "ok" } else { "warning" };
+        let (missing, missing_total) = cap_missing(missing);
+        CreateResult::Done { status, missing, missing_total }
+    }
+
+    /// 취소 마감
+    pub fn canceled() -> Self {
+        CreateResult::Done { status: "canceled", missing: Vec::new(), missing_total: 0 }
+    }
+}
+
+/// 진행 상황, done/total = 바이트(7z 는 엔진이 세는 작업량 단위), total 0 = 미상
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub percent: u8,
+    pub current_file: Option<String>,
+    pub done: u64,
+    pub total: u64,
+}
+
+impl Progress {
+    /// 처리량에서 percent 산출, total 0 이면 0
+    pub fn new(done: u64, total: u64, current_file: Option<String>) -> Self {
+        let percent = if total == 0 {
+            0
+        } else {
+            ((done.saturating_mul(100)) / total).min(100) as u8
+        };
+        Progress { percent, current_file, done, total }
+    }
+
+    /// 마감(100%), 작은 작업은 진행 콜백이 한 번도 오지 않으므로 끝에서 1회
+    pub fn finished(total: u64) -> Self {
+        Progress { percent: 100, current_file: None, done: total, total }
+    }
+}
+
+/// 제네릭 아닌 트레이트 객체 = dyn ArchiveBackend 객체 안전성
+pub type ProgressFn<'a> = dyn FnMut(Progress) + 'a;
 
 /// 압축 백엔드 공통 인터페이스, 라우팅 후 앱은 이것만 호출
 /// Send + Sync = 소비자가 Router 를 static(OnceLock)으로 들기 위함
@@ -471,7 +588,7 @@ mod router_tests {
             _pr: &mut ProgressFn<'_>,
             _c: Arc<AtomicBool>,
         ) -> ExtractResult {
-            ExtractResult::Done { status: "ok", message: String::new() }
+            ExtractResult::finish(Vec::new())
         }
         fn create(
             &self,
@@ -479,7 +596,7 @@ mod router_tests {
             _pr: &mut ProgressFn<'_>,
             _c: Arc<AtomicBool>,
         ) -> CreateResult {
-            CreateResult::Done { status: "ok", message: String::new() }
+            CreateResult::finish(Vec::new())
         }
         fn test(&self, _a: &str, _p: Option<&str>) -> Result<(), ZipManiaError> {
             Ok(())
@@ -643,5 +760,68 @@ mod unegg_routing_tests {
         // 7z 가 .egg 생성 시도하면 안 됨
         let r = Router::new(PathBuf::from("7z.dll"));
         assert_eq!(r.for_format("egg").id(), "unegg");
+    }
+}
+
+/// 마감 판정 — ok 는 "전부 담겼다", 앱이 그 값으로 원본 삭제 (D3.5)
+#[cfg(test)]
+mod finish_tests {
+    use super::*;
+
+    #[test]
+    fn 빠진_항목이_있으면_ok_가_아니다() {
+        let m = vec![MissingItem::new("a.txt", MissingReason::Link)];
+        match ExtractResult::finish(m) {
+            ExtractResult::Done { status, missing, missing_total } => {
+                assert_eq!(status, "warning", "빠진 항목이 있는데 ok 로 마감했다");
+                assert_eq!(missing.len(), 1);
+                assert_eq!(missing_total, 1);
+            }
+            ExtractResult::Failed(e) => panic!("실패로 마감: {}", e.code),
+        }
+        match CreateResult::finish(vec![MissingItem::new("a.txt", MissingReason::Missing)]) {
+            CreateResult::Done { status, .. } => assert_eq!(status, "warning"),
+            CreateResult::Failed(e) => panic!("실패로 마감: {}", e.code),
+        }
+    }
+
+    #[test]
+    fn 빠진_것이_없으면_ok() {
+        match ExtractResult::finish(Vec::new()) {
+            ExtractResult::Done { status, missing, missing_total } => {
+                assert_eq!(status, "ok");
+                assert!(missing.is_empty());
+                assert_eq!(missing_total, 0);
+            }
+            ExtractResult::Failed(e) => panic!("실패로 마감: {}", e.code),
+        }
+    }
+
+    /// 상한을 넘겨도 개수는 보고 — 조용히 자르면 "그만큼만 빠졌다" 로 읽힌다
+    #[test]
+    fn 상한을_넘으면_개수를_따로_보고한다() {
+        let n = MISSING_CAP + 7;
+        let m: Vec<MissingItem> = (0..n)
+            .map(|i| MissingItem::new(format!("f{i}.txt"), MissingReason::Read))
+            .collect();
+        match ExtractResult::finish(m) {
+            ExtractResult::Done { missing, missing_total, .. } => {
+                assert_eq!(missing.len(), MISSING_CAP, "상한을 넘겨 실었다");
+                assert_eq!(missing_total, n, "자르기 전 개수를 잃었다");
+            }
+            ExtractResult::Failed(e) => panic!("실패로 마감: {}", e.code),
+        }
+    }
+
+    #[test]
+    fn 취소는_빠진_항목을_싣지_않는다() {
+        match ExtractResult::canceled() {
+            ExtractResult::Done { status, missing, missing_total } => {
+                assert_eq!(status, "canceled");
+                assert!(missing.is_empty());
+                assert_eq!(missing_total, 0);
+            }
+            ExtractResult::Failed(e) => panic!("실패로 마감: {}", e.code),
+        }
     }
 }

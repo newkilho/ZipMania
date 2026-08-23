@@ -391,13 +391,78 @@ impl ArchiveBackend for Unegg {
     ) -> Result<Vec<u8>, ZipManiaError> {
         let data = load(archive)?;
         let items = parse_items(&data)?;
-        let want = inner_path.replace('\\', "/");
-        let item = items
-            .iter()
-            .find(|i| !i.is_dir && i.path == want)
-            .ok_or_else(|| {
-                ZipManiaError::new("not_found", "아카이브 안에서 해당 항목을 찾지 못했습니다.")
-            })?;
+        let item = find_item(&items, inner_path)?;
         read_item(&data, item, password)
     }
+
+    /// 드래그, 더블클릭 실행용 단일 항목 추출, 디스크 경로라 크기 상한 미적용
+    fn extract_entry_to_file(
+        &self,
+        archive: &str,
+        inner_path: &str,
+        dest_file: &std::path::Path,
+        password: Option<&str>,
+    ) -> Result<(), ZipManiaError> {
+        let data = load(archive)?;
+        let items = parse_items(&data)?;
+        let item = find_item(&items, inner_path)?;
+        // 대상 truncate 금지, 전체 해제와 같은 StagedFile 로 옆에 쓰고 성공 시 이동
+        let (out, staged) = crate::outfile::StagedFile::create(dest_file).map_err(|e| {
+            ZipManiaError::new("io_error", format!("파일을 만들지 못했습니다: {e}"))
+        })?;
+        let mut out = std::io::BufWriter::new(out);
+        let wrote = match read_item_to(&data, item, password, 0, &mut out) {
+            Ok(n) => n,
+            Err(e) => {
+                staged.abort();
+                return Err(e);
+            }
+        };
+        // flush 필수, BufWriter 는 drop 때 기록 → 그 실패가 조용히 버려진다
+        if let Err(e) = std::io::Write::flush(&mut out) {
+            staged.abort();
+            return Err(ZipManiaError::new(
+                "io_error",
+                format!("파일을 쓰지 못했습니다: {e}"),
+            ));
+        }
+        drop(out);
+        // 신고 크기와 산출 크기 불일치 = 미이동, 전체 해제와 같은 판정
+        if wrote != item.size {
+            staged.abort();
+            return Err(ZipManiaError::new(
+                "corrupt",
+                format!("목록은 {}바이트인데 {wrote}바이트가 나왔습니다", item.size),
+            ));
+        }
+        staged.commit()
+    }
+
+    /// Shell DnD 지연 렌더링용, 임시 파일 없이 writer 로 흘린다
+    fn extract_entry_to_writer(
+        &self,
+        archive: &str,
+        inner_path: &str,
+        mut writer: Box<dyn std::io::Write + Send>,
+        password: Option<&str>,
+    ) -> Result<(), ZipManiaError> {
+        let data = load(archive)?;
+        let items = parse_items(&data)?;
+        let item = find_item(&items, inner_path)?;
+        read_item_to(&data, item, password, 0, &mut writer)?;
+        writer
+            .flush()
+            .map_err(|e| ZipManiaError::new("io_error", format!("파일을 쓰지 못했습니다: {e}")))
+    }
+}
+
+/// 내부 경로로 파일 항목 찾기, 폴더/미존재 = not_found
+fn find_item<'a>(items: &'a [Item], inner_path: &str) -> Result<&'a Item, ZipManiaError> {
+    let want = inner_path.replace('\\', "/");
+    items
+        .iter()
+        .find(|i| !i.is_dir && i.path == want)
+        .ok_or_else(|| {
+            ZipManiaError::new("not_found", "아카이브 안에서 해당 항목을 찾지 못했습니다.")
+        })
 }

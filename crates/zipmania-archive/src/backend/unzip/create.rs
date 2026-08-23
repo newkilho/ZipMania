@@ -14,12 +14,11 @@ use zip::unstable::write::FileOptionsExt;
 use zip::write::{FileOptions, SimpleFileOptions};
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::backend::{CreateOptions, CreateResult, EditOptions, ProgressFn};
+use crate::backend::{CreateOptions, CreateResult, EditOptions, Progress, ProgressFn};
 use crate::error::ZipManiaError;
-use crate::inputs::summarize;
 use crate::outfile::reserve_tmp;
 
-use super::{canceled, entry_name, parallel, percent, Archive};
+use super::{canceled, entry_name, parallel, Archive};
 
 /// 로컬 시간대 오프셋(1회 조회), zip 시각 = 로컬 시간 → UTC 로 적으면 날짜가 시간대만큼 어긋남
 /// 조회 불가 환경(멀티스레드 Unix) = UTC
@@ -124,9 +123,9 @@ fn stream_file<W: Write + std::io::Seek>(
         *done += n as u64;
         // 이름은 1회만 전송, 청크마다 String 생성 시 수천 번 할당
         if reported {
-            on_progress(percent(*done, total), None);
+            on_progress(Progress::new(*done, total, None));
         } else {
-            on_progress(percent(*done, total), Some(name.to_string()));
+            on_progress(Progress::new(*done, total, Some(name.to_string())));
             reported = true;
         }
     }
@@ -201,10 +200,7 @@ pub fn do_create(
             return $ret;
         }};
     }
-    let canceled_result = || CreateResult::Done {
-        status: "canceled",
-        message: "사용자가 취소했습니다.".to_string(),
-    };
+    let canceled_result = CreateResult::canceled;
 
     for (idx, item) in items.iter().enumerate() {
         if canceled(&cancel) {
@@ -251,7 +247,7 @@ pub fn do_create(
                 bail!(zw, pipe, CreateResult::Failed(super::map_err(e, false)));
             }
             done += item.size;
-            on_progress(percent(done, total), Some(name));
+            on_progress(Progress::new(done, total, Some(name)));
             continue;
         }
 
@@ -312,8 +308,8 @@ pub fn do_create(
     if let Err(e) = tmp_path.commit() {
         return CreateResult::Failed(e);
     }
-    on_progress(100, None);
-    finish_message(skipped)
+    on_progress(Progress::finished(total));
+    CreateResult::finish(skipped)
 }
 
 /// 아카이브 편집, 기존 항목 = 재압축 없이 복사, 추가분만 새로 압축
@@ -357,10 +353,7 @@ pub fn do_edit(
         if canceled(&cancel) {
             let _ = zw.finish();
             abort(&tmp_path);
-            return CreateResult::Done {
-                status: "canceled",
-                message: "사용자가 취소했습니다.".into(),
-            };
+            return CreateResult::canceled();
         }
         let f = match ar.by_index_raw(i) {
             Ok(f) => f,
@@ -386,10 +379,7 @@ pub fn do_edit(
         if canceled(&cancel) {
             let _ = zw.finish();
             abort(&tmp_path);
-            return CreateResult::Done {
-                status: "canceled",
-                message: "사용자가 취소했습니다.".into(),
-            };
+            return CreateResult::canceled();
         }
         let name = item.name.replace('\\', "/");
         // 암호 = 아카이브에 걸린 것 그대로, 평문 삽입 시 한 아카이브에 암호, 평문 혼재
@@ -422,10 +412,7 @@ pub fn do_edit(
             Ok(false) => {
                 let _ = zw.finish();
                 abort(&tmp_path);
-                return CreateResult::Done {
-                    status: "canceled",
-                    message: "사용자가 취소했습니다.".into(),
-                };
+                return CreateResult::canceled();
             }
             Err(e) => {
                 let _ = zw.finish();
@@ -456,25 +443,8 @@ pub fn do_edit(
     if let Err(e) = tmp_path.commit() {
         return CreateResult::Failed(e);
     }
-    on_progress(100, None);
-    finish_message(skipped)
+    on_progress(Progress::finished(total));
+    CreateResult::finish(skipped)
 }
 
-/// 누락분 있으면 warning, 조용히 빠지면 압축했는데 안에 없는 상태
-fn finish_message(skipped: Vec<String>) -> CreateResult {
-    if skipped.is_empty() {
-        CreateResult::Done {
-            status: "ok",
-            message: "압축을 완료했습니다.".into(),
-        }
-    } else {
-        CreateResult::Done {
-            status: "warning",
-            message: format!(
-                "압축을 마쳤지만 {}개 항목을 담지 못했습니다({}).",
-                skipped.len(),
-                summarize(&skipped)
-            ),
-        }
-    }
-}
+

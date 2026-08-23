@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use windows_core::{Interface, BSTR, HRESULT};
 
+use crate::backend::{MissingItem, MissingReason, Progress};
 use super::com::*;
 use super::crc32;
 use super::ffi::to_wide_nul;
@@ -26,17 +27,17 @@ pub use crate::formats::ScanFn;
 
 /// 진행률 클로저로의 원시 포인터, 작업(Extract/UpdateItems) 동안만 유효하다
 #[derive(Clone, Copy)]
-pub struct ProgressSink(*mut (dyn FnMut(u8, Option<String>) + 'static));
+pub struct ProgressSink(*mut (dyn FnMut(Progress) + 'static));
 
 impl ProgressSink {
     /// &mut dyn FnMut 에서 생성, 반환 값은 그 참조 생존 동안(동기 작업 범위)만 유효
-    pub fn new<'a>(f: &mut (dyn FnMut(u8, Option<String>) + 'a)) -> Self {
-        let p: *mut (dyn FnMut(u8, Option<String>) + 'a) = f;
+    pub fn new<'a>(f: &mut (dyn FnMut(Progress) + 'a)) -> Self {
+        let p: *mut (dyn FnMut(Progress) + 'a) = f;
         // 라이프타임만 제거(레이아웃 동일) + 동기 작업 범위 내 호출 한정
         ProgressSink(unsafe { std::mem::transmute(p) })
     }
-    unsafe fn call(&self, percent: u8, file: Option<String>) {
-        (*self.0)(percent, file);
+    unsafe fn call(&self, p: Progress) {
+        (*self.0)(p);
     }
 }
 
@@ -108,7 +109,7 @@ pub struct ExtractShared {
     pub crypto_requested: Arc<AtomicBool>,
     pub aborted: Arc<AtomicBool>,
     pub unsafe_paths: Arc<Mutex<Vec<String>>>,
-    pub failed_paths: Arc<Mutex<Vec<(String, String)>>>,
+    pub failed_paths: Arc<Mutex<Vec<MissingItem>>>,
     pending: Arc<Mutex<Option<PendingStaged>>>,
 }
 
@@ -137,15 +138,19 @@ impl ExtractShared {
             let got = std::fs::metadata(p.staged.path()).map(|m| m.len()).unwrap_or(0);
             if got < want {
                 p.staged.abort();
-                self.failed_paths.lock().unwrap().push((
+                self.failed_paths.lock().unwrap().push(MissingItem::detailed(
                     p.path,
-                    format!("목록은 {want}바이트인데 {got}바이트만 나왔습니다"),
+                    MissingReason::SizeMismatch,
+                    format!("{got} / {want}"),
                 ));
                 return;
             }
         }
         if let Err(e) = p.staged.commit() {
-            self.failed_paths.lock().unwrap().push((p.path, e.message));
+            self.failed_paths
+                .lock()
+                .unwrap()
+                .push(MissingItem::detailed(p.path, MissingReason::Commit, e.message));
         }
     }
 }
@@ -244,12 +249,12 @@ struct ExtractCb {
 impl ExtractCb {
     /// 쓰지 못한 항목 기록, 7z 에는 널 스트림(= 건너뛰기)만 반환 가능 → 여기서 남기지
     /// 않으면 그 항목의 누락 사실이 어디에도 미기록
-    fn record_failure(&self, path: &str, why: &dyn std::fmt::Display) {
-        self.shared
-            .failed_paths
-            .lock()
-            .unwrap()
-            .push((path.replace('\\', "/"), why.to_string()));
+    fn record_failure(&self, path: &str, reason: MissingReason, why: &dyn std::fmt::Display) {
+        self.shared.failed_paths.lock().unwrap().push(MissingItem::detailed(
+            path.replace('\\', "/"),
+            reason,
+            why.to_string(),
+        ));
     }
 
     fn abort_if_canceled(&self) -> bool {
@@ -275,13 +280,8 @@ impl IArchiveExtractCallback_Impl for ExtractCb_Impl {
         if let Some(sink) = &self.progress {
             let total = *self.total.lock().unwrap();
             let c = if complete.is_null() { 0 } else { *complete };
-            let percent = if total > 0 {
-                ((c.saturating_mul(100)) / total).min(100) as u8
-            } else {
-                0
-            };
             let file = self.current_file.lock().unwrap().clone();
-            sink.call(percent, file);
+            sink.call(Progress::new(c, total, file));
         }
         S_OK
     }
@@ -453,7 +453,7 @@ impl IArchiveExtractCallback_Impl for ExtractCb_Impl {
 
         if is_dir {
             if let Err(e) = std::fs::create_dir_all(&target) {
-                self.record_failure(path, &e);
+                self.record_failure(path, MissingReason::CreateDir, &e);
             }
             return S_OK;
         }
@@ -473,7 +473,7 @@ impl IArchiveExtractCallback_Impl for ExtractCb_Impl {
         };
         if let Some(parent) = target.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                self.record_failure(path, &e);
+                self.record_failure(path, MissingReason::CreateDir, &e);
                 return S_OK;
             }
         }
@@ -497,7 +497,7 @@ impl IArchiveExtractCallback_Impl for ExtractCb_Impl {
             // 생성 실패 = 널 스트림으로 건너뛰기 + 기록 필수, 조용히 넘기면 파일 누락
             // "해제 성공" 이 되고, [해제 후 원본 삭제] 와 만나면 복구가 불가능하다
             Err(e) => {
-                self.record_failure(path, &e);
+                self.record_failure(path, MissingReason::CreateFile, &e);
                 S_OK
             }
         }
@@ -660,13 +660,8 @@ impl IArchiveUpdateCallback_Impl for UpdateCb_Impl {
         if let Some(sink) = &self.progress {
             let total = *self.total.lock().unwrap();
             let c = if complete.is_null() { 0 } else { *complete };
-            let percent = if total > 0 {
-                ((c.saturating_mul(100)) / total).min(100) as u8
-            } else {
-                0
-            };
             let file = self.current_file.lock().unwrap().clone();
-            sink.call(percent, file);
+            sink.call(Progress::new(c, total, file));
         }
         S_OK
     }
@@ -898,7 +893,12 @@ mod settle_tests {
         );
         let failed = sh.failed_paths.lock().unwrap();
         assert_eq!(failed.len(), 1, "빠진 항목으로 기록되지 않았다");
-        assert!(failed[0].1.contains("999"), "무엇이 어긋났는지 알려 주지 않는다: {}", failed[0].1);
+        assert_eq!(failed[0].reason, MissingReason::SizeMismatch, "사유가 다르다");
+        assert!(
+            failed[0].detail.as_deref().unwrap_or("").contains("999"),
+            "무엇이 어긋났는지 알려 주지 않는다: {:?}",
+            failed[0].detail
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 

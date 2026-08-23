@@ -7,13 +7,12 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::backend::{ExtractOptions, ExtractResult, ProgressFn};
+use crate::backend::{ExtractOptions, ExtractResult, MissingItem, MissingReason, Progress, ProgressFn};
 use crate::error::ZipManiaError;
 use crate::formats::{unique_path, OverwriteMode};
-use crate::inputs::summarize;
 use crate::paths;
 
-use super::{canceled, entry_name, open_entry, percent, Archive};
+use super::{canceled, entry_name, open_entry, Archive};
 
 /// 항목의 선택 범위 포함 여부, 비면 전체
 fn in_scope(path: &str, selected: &[String]) -> bool {
@@ -59,18 +58,12 @@ pub fn extract_all(
     let mut done = 0u64;
 
     // 미기록 항목 기록 필수, ok = 전부 풀림 → 앱이 그 값으로 [해제 후 원본 삭제] 수행
-    let mut unsafe_paths: Vec<String> = Vec::new();
-    let mut failed: Vec<String> = Vec::new();
-    // 신고 크기 != 실제 출력 크기인 항목(풀리긴 함)
-    let mut mismatched: Vec<String> = Vec::new();
+    let mut missing: Vec<MissingItem> = Vec::new();
     let mut last_parent: Option<std::path::PathBuf> = None;
 
     for (index, name, is_dir, size) in targets {
         if canceled(&cancel) {
-            return ExtractResult::Done {
-                status: "canceled",
-                message: "사용자가 취소했습니다.".into(),
-            };
+            return ExtractResult::canceled();
         }
 
         let rel_name = if opts.keep_paths {
@@ -85,14 +78,18 @@ pub fn extract_all(
         {
             Ok(t) => t,
             Err(_) => {
-                unsafe_paths.push(name.clone());
+                missing.push(MissingItem::new(name.clone(), MissingReason::UnsafePath));
                 continue;
             }
         };
 
         if is_dir {
             if let Err(e) = fs::create_dir_all(&target) {
-                failed.push(format!("{name} ({e})"));
+                missing.push(MissingItem::detailed(
+                    name.clone(),
+                    MissingReason::CreateDir,
+                    e.to_string(),
+                ));
             }
             continue;
         }
@@ -108,7 +105,7 @@ pub fn extract_all(
             target
         };
 
-        on_progress(percent(done, total), Some(name.clone()));
+        on_progress(Progress::new(done, total, Some(name.clone())));
 
         let mut f = match open_entry(&mut ar, index, opts.password.as_deref()) {
             Ok(f) => f,
@@ -117,7 +114,11 @@ pub fn extract_all(
                 return ExtractResult::Failed(e)
             }
             Err(e) => {
-                failed.push(format!("{name} ({})", e.message));
+                missing.push(MissingItem::detailed(
+                    name.clone(),
+                    MissingReason::Read,
+                    e.message,
+                ));
                 continue;
             }
         };
@@ -126,7 +127,11 @@ pub fn extract_all(
         if let Some(parent) = target.parent() {
             if last_parent.as_deref() != Some(parent) {
                 if let Err(e) = fs::create_dir_all(parent) {
-                    failed.push(format!("{name} (폴더를 만들지 못함: {e})"));
+                    missing.push(MissingItem::detailed(
+                        name.clone(),
+                        MissingReason::CreateDir,
+                        e.to_string(),
+                    ));
                     continue;
                 }
                 last_parent = Some(parent.to_path_buf());
@@ -136,7 +141,11 @@ pub fn extract_all(
         let (out, staged) = match crate::outfile::StagedFile::create(&target) {
             Ok(v) => v,
             Err(e) => {
-                failed.push(format!("{name} (파일을 만들지 못함: {e})"));
+                missing.push(MissingItem::detailed(
+                    name.clone(),
+                    MissingReason::CreateFile,
+                    e.to_string(),
+                ));
                 continue;
             }
         };
@@ -150,10 +159,7 @@ pub fn extract_all(
             if canceled(&cancel) {
                 drop(out);
                 staged.abort();
-                return ExtractResult::Done {
-                    status: "canceled",
-                    message: "사용자가 취소했습니다.".into(),
-                };
+                return ExtractResult::canceled();
             }
             let n = match f.read(&mut buf) {
                 Ok(0) => break,
@@ -169,7 +175,7 @@ pub fn extract_all(
             }
             wrote += n as u64;
             done += n as u64;
-            on_progress(percent(done, total), Some(name.clone()));
+            on_progress(Progress::new(done, total, Some(name.clone())));
         }
         drop(f);
         if let Err(e) = std::io::Write::flush(&mut out) {
@@ -180,54 +186,31 @@ pub fn extract_all(
         if let Some(why) = broke {
             // 반쯤 쓰인 파일 잔류 금지, 임시 파일만 삭제, 원본 유지
             staged.abort();
-            failed.push(format!("{name} ({why})"));
+            missing.push(MissingItem::detailed(name.clone(), MissingReason::Write, why));
             continue;
         }
         // 신고 크기와 산출 크기 불일치 시 미이동(CRC 는 목록의 거짓말 미탐지)
         // 검사가 commit 보다 먼저 — 모순 항목은 미기록 + 누락 보고
         if size != wrote {
             staged.abort();
-            mismatched.push(format!("{name} ({wrote}바이트, 목록은 {size}바이트)"));
+            missing.push(MissingItem::detailed(
+                name.clone(),
+                MissingReason::SizeMismatch,
+                format!("{wrote} / {size}"),
+            ));
             continue;
         }
         // 전체 기록 후 이동, 이동 실패 시 원본 유지 → 실패로 기록
         if let Err(e) = staged.commit() {
-            failed.push(format!("{name} ({})", e.message));
+            missing.push(MissingItem::detailed(
+                name.clone(),
+                MissingReason::Commit,
+                e.message,
+            ));
             continue;
         }
     }
 
-    on_progress(100, None);
-    if !unsafe_paths.is_empty() || !failed.is_empty() || !mismatched.is_empty() {
-        let mut parts = Vec::new();
-        if !mismatched.is_empty() {
-            parts.push(format!(
-                "목록과 크기가 달라 쓰지 않은 항목 {}개({})",
-                mismatched.len(),
-                summarize(&mismatched)
-            ));
-        }
-        if !unsafe_paths.is_empty() {
-            parts.push(format!(
-                "해제 폴더를 벗어나는 경로 {}개를 건너뛰었습니다({})",
-                unsafe_paths.len(),
-                summarize(&unsafe_paths)
-            ));
-        }
-        if !failed.is_empty() {
-            parts.push(format!(
-                "쓰지 못한 항목 {}개({})",
-                failed.len(),
-                summarize(&failed)
-            ));
-        }
-        return ExtractResult::Done {
-            status: "warning",
-            message: format!("해제를 마쳤지만 일부 항목이 빠졌습니다. {}.", parts.join(" / ")),
-        };
-    }
-    ExtractResult::Done {
-        status: "ok",
-        message: "해제를 완료했습니다.".to_string(),
-    }
+    on_progress(Progress::finished(total));
+    ExtractResult::finish(missing)
 }

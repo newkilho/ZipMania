@@ -12,6 +12,8 @@ import {
   save as saveFileDialog,
   confirm as confirmDialog,
 } from "@tauri-apps/plugin-dialog";
+import { get } from "svelte/store";
+import { t } from "./i18n.js";
 
 /**
  * 7z 버전 문자열 조회
@@ -106,12 +108,12 @@ export async function pickArchiveFile() {
   const selected = await openFileDialog({
     multiple: false,
     directory: false,
-    title: "아카이브 열기",
+    title: get(t)("dialog.openArchive"),
     filters: [
       {
         // 정본은 crates/zipmania-archive 의 READ_EXTS (D3.8)
         // 어긋나면 열기필터_목록이_정본과_일치 실패
-        name: "압축 파일",
+        name: get(t)("dialog.archiveFiles"),
         extensions: [
           "7z", "zip", "zipx", "jar", "rar", "r00", "arj", "lzh", "lha", "cab",
           "tar", "ova", "gz", "gzip", "tgz", "tpz", "bz2", "bzip2", "tbz", "tbz2",
@@ -121,7 +123,7 @@ export async function pickArchiveFile() {
           "001", "cbz", "cbr", "cb7", "egg", "alz",
         ],
       },
-      { name: "모든 파일", extensions: ["*"] },
+      { name: get(t)("dialog.allFiles"), extensions: ["*"] },
     ],
   });
   // multiple:false 이면 문자열 또는 null
@@ -150,7 +152,7 @@ export async function pickFolder(defaultPath) {
   const selected = await openFileDialog({
     multiple: false,
     directory: true,
-    title: "해제할 폴더 선택",
+    title: get(t)("dialog.pickDest"),
     defaultPath: defaultPath || undefined,
   });
   return typeof selected === "string" ? selected : null;
@@ -193,7 +195,7 @@ export async function pickInputFiles() {
   const selected = await openFileDialog({
     multiple: true,
     directory: false,
-    title: "압축할 파일 선택",
+    title: get(t)("dialog.pickFiles"),
   });
   if (Array.isArray(selected)) return selected;
   return typeof selected === "string" ? [selected] : [];
@@ -207,7 +209,7 @@ export async function pickInputFolders() {
   const selected = await openFileDialog({
     multiple: true,
     directory: true,
-    title: "압축할 폴더 선택",
+    title: get(t)("dialog.pickFolders"),
   });
   if (Array.isArray(selected)) return selected;
   return typeof selected === "string" ? [selected] : [];
@@ -220,13 +222,12 @@ export async function pickInputFolders() {
  */
 export async function pickSaveArchive(defaultPath) {
   const selected = await saveFileDialog({
-    title: "아카이브 저장",
+    title: get(t)("dialog.saveArchive"),
     defaultPath: defaultPath || undefined,
-    filters: [
-      { name: "7z 아카이브", extensions: ["7z"] },
-      { name: "ZIP 아카이브", extensions: ["zip"] },
-      { name: "TAR 아카이브", extensions: ["tar"] },
-    ],
+    filters: ["7z", "zip", "tar"].map((ext) => ({
+      name: get(t)("dialog.archiveOf", { ext: ext.toUpperCase() }),
+      extensions: [ext],
+    })),
   });
   return typeof selected === "string" ? selected : null;
 }
@@ -515,14 +516,6 @@ export async function resizeCurrentWindow(width, height) {
   await win.center();
 }
 
-/**
- * 현재 창을 화면 중앙으로
- * @returns {Promise<void>}
- */
-export async function centerCurrentWindow() {
-  return await getCurrentWindow().center();
-}
-
 // ─── 환경설정(settings.toml — localStorage 캐시 없이 그때그때 읽는다) ────────────
 
 /**
@@ -740,10 +733,11 @@ export async function revealFile(path) {
  * 항목을 임시 폴더에 풀고 실행, 아카이브면 실행 대신 경로 반환, 아니면 기본 연결로 실행 후 null
  * @param {string} archive 열린 아카이브 경로
  * @param {string} innerPath 실행할 내부 파일 경로("/" 정규화)
+ * @param {string} [password] 암호 재질의용, 생략 시 세션 암호
  * @returns {Promise<string|null>} 아카이브면 풀린 임시 파일 경로, 아니면 null
  */
-export async function openEntry(archive, innerPath) {
-  return await invoke("open_entry", { archive, innerPath });
+export async function openEntry(archive, innerPath, password) {
+  return await invoke("open_entry", { archive, innerPath, password });
 }
 
 /**

@@ -26,13 +26,15 @@
     resizeCurrentWindow,
     setCurrentWindowTitle,
   } from "../lib/api.js";
-  import { formatSize } from "../lib/format.js";
+  import { formatSize, missingLines } from "../lib/format.js";
+  import { newMeter, sample } from "../lib/progress.js";
+  import JobView from "./JobView.svelte";
   import { FORM_DEFAULTS, isFormDirty, batchIssueAfter, runPlan } from "../lib/compressPlan.js";
   import { createCoordinator } from "../lib/compressCoordinator.js";
 
   // 폼/진행 화면 창 크기, 폼 값 = Rust open_compress_window 의 inner_size 와 동일 필요
   const FORM_SIZE = [680, 620];
-  const JOB_SIZE = [460, 240];
+  const JOB_SIZE = [520, 340];
 
   // 포맷별 확장자
   const FORMAT_EXT = { "7z": "7z", zip: "zip", tar: "tar" };
@@ -73,26 +75,57 @@
   let jobPercent = 0;
   let jobFile = "";
   let jobResult = null; // { status: "ok"|"warning"|"canceled"|"error", message }
+  // 처리량/속도/시간 — done, total 은 백엔드가 주는 바이트(0 = 미상)
+  let jobDone = 0;
+  let jobTotal = 0;
+  let meter = null;
+  let elapsedSec = 0;
+  let ticker = null;
+  // 빠진 항목(경고) 상세 — 결과 화면에서만 표시
+  let missingShown = [];
 
-  // 결과 상태별 아이콘, 색 클래스
-  $: resultCls =
-    jobResult == null
-      ? ""
-      : jobResult.status === "ok"
-        ? "ok"
-        : jobResult.status === "warning"
-          ? "warn"
-          : jobResult.status === "canceled"
-            ? "cancel"
-            : "err";
-  $: resultIcon =
-    jobResult == null
-      ? ""
-      : jobResult.status === "ok"
-        ? "✓"
-        : jobResult.status === "canceled"
-          ? "⨯"
-          : "⚠";
+  /** 진행 시계 시작 — 경과 시간은 이벤트가 아니라 시계가 갱신 */
+  function startTicker() {
+    stopTicker();
+    ticker = setInterval(() => {
+      if (meter) elapsedSec = (Date.now() - meter.startMs) / 1000;
+    }, 1000);
+  }
+  function stopTicker() {
+    if (ticker) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  }
+
+  /** 진행 표시 초기화(다음 작업 준비) */
+  function resetProgress() {
+    stopTicker();
+    meter = null;
+    jobDone = 0;
+    jobTotal = 0;
+    elapsedSec = 0;
+    missingShown = [];
+  }
+
+  /** 이 작업의 시계 시작 */
+  function startProgress() {
+    meter = newMeter(Date.now());
+    startTicker();
+  }
+
+  /** job:progress 의 바이트 반영 — 속도는 표본 간격을 두고 갱신 */
+  function onProgressBytes(ev) {
+    jobDone = ev.done || 0;
+    jobTotal = ev.total || 0;
+    meter = sample(meter, jobDone, Date.now());
+  }
+
+  /** 작업 종료 — 시계를 멈추고 경과 시간을 확정 */
+  function finishProgress() {
+    if (meter) elapsedSec = (Date.now() - meter.startMs) / 1000;
+    stopTicker();
+  }
 
   // UI 로컬 상태
   let showPasswordPanel = false; // 암호 설정 인라인 패널 표시 여부
@@ -193,6 +226,7 @@
     jobResult = null;
     jobPercent = 0;
     jobFile = "";
+    resetProgress();
     jobId = null;
     startError = "";
     pendingEvents = [];
@@ -265,6 +299,7 @@
     if (kind === "progress") {
       jobPercent = ev.percent;
       jobFile = ev.currentFile;
+      onProgressBytes(ev);
     } else if (kind === "done") {
       onJobFinished(ev);
     } else {
@@ -281,6 +316,8 @@
 
   /** 작업 완료 처리, */
   function onJobFinished(d) {
+    // 빠진 항목은 마지막 작업 것만 두지 않고 쌓는다(배치에서 앞 항목이 묻힌다)
+    missingShown = [...missingShown, ...missingLines(get(t), d.missing, d.missingTotal)];
     // 배치("각각 압축"): 다음 원본으로 넘어가거나, 마지막이면 완료
     if (batchMode && d.status !== "canceled") {
         // ok 아닌 것은 전부 흠집, warning 을 세지 않으면 마지막 항목의 성공이 덮는다
@@ -291,6 +328,7 @@
         return;
       }
       phase = "done";
+      finishProgress();
       jobPercent = 100;
       // 앞 항목의 실패를 마지막 항목의 성공으로 덮지 않는다
       jobResult = {
@@ -300,11 +338,16 @@
       return;
     }
     phase = "done";
+    finishProgress();
     // 성공 시 진행률 100 마감, 작은 아카이브는 진행률 콜백이 한 번도 오지 않는다
     if (d.status !== "canceled") jobPercent = 100;
-    // 완료/취소 메시지 = 상태 기반 번역(백엔드 원문은 한국어 고정)
+    // 완료/취소 메시지 = 상태 기반 번역, 빠진 항목이 있으면 그 요약
     const tr = get(t);
-    const msg = d.status === "canceled" ? tr("compress.doneCanceled") : tr("compress.doneOk");
+    const missing = missingLines(tr, d.missing, d.missingTotal);
+    const msg =
+      d.status === "canceled"
+        ? tr("compress.doneCanceled")
+        : missing[0] || tr("compress.doneOk");
     jobResult = { status: d.status, message: msg };
   }
 
@@ -318,11 +361,13 @@
         runCompressItem();
       } else {
         phase = "done";
+        finishProgress();
         jobResult = { status: "warning", message: get(t)("compress.doneOk") };
       }
       return;
     }
     phase = "done";
+    finishProgress();
     jobResult = { status: "error", message: errText(get(t), e.code, e.message) };
   }
 
@@ -345,6 +390,8 @@
       jobId = id;
       jobPercent = 0;
       jobFile = fileNameOf(item.input);
+      resetProgress();
+      startProgress();
       jobResult = null;
       phase = "running";
       starting = false; // 등록 완료 — 이후 진행률/완료 이벤트가 이 작업을 견인
@@ -373,6 +420,7 @@
   }
 
   onDestroy(() => {
+    stopTicker();
     if (unlistenAdd) unlistenAdd();
     if (unlistenDrop) unlistenDrop();
     for (const off of unlistenJobs) off && off();
@@ -714,6 +762,8 @@
       starting = false;
       jobPercent = 0;
       jobFile = "";
+      resetProgress();
+      startProgress();
       jobResult = null;
       phase = "running";
       // 진행/완료 화면은 설정 폼보다 훨씬 작으므로 창을 컴팩트하게 줄인다
@@ -918,28 +968,25 @@
   </div>
   {:else if phase === "running"}
     <!-- 진행 화면 -->
-    <div class="job-view">
-      <div class="job-title">{$t("compress.running")}</div>
-      <div class="bar"><div class="fill" style="width: {jobPercent}%"></div></div>
-      <div class="job-meta">
-        <span class="pct">{jobPercent}%</span>
-        <span class="file" title={jobFile}>{jobFile || $t("progress.preparing")}</span>
-      </div>
-      <div class="job-actions">
-        <button class="ghost" on:click={onCancelJob}>{$t("common.cancel")}</button>
-      </div>
-    </div>
+    <JobView
+      phase="running"
+      title={$t("compress.running")}
+      badge={batchMode ? $t("progress.batchItem", { index: batchIndex + 1, count: batchItems.length }) : ""}
+      percent={jobPercent}
+      done={jobDone}
+      total={jobTotal}
+      {meter}
+      {elapsedSec}
+      file={jobFile}
+      missing={missingShown}
+    >
+      <button slot="actions" class="ghost" on:click={onCancelJob}>{$t("common.cancel")}</button>
+    </JobView>
   {:else}
     <!-- 완료/실패 화면 -->
-    <div class="job-view">
-      <div class="result {resultCls}">
-        <span class="r-ic">{resultIcon}</span>
-        <span class="r-msg">{jobResult ? jobResult.message : ""}</span>
-      </div>
-      <div class="job-actions">
-        <button class="primary" on:click={onCancel}>{$t("common.close")}</button>
-      </div>
-    </div>
+    <JobView phase="done" result={jobResult} {elapsedSec} missing={missingShown}>
+      <button slot="actions" class="primary" on:click={onCancel}>{$t("common.close")}</button>
+    </JobView>
   {/if}
 </div>
 
@@ -1216,78 +1263,5 @@
     border-color: var(--accent);
   }
   /* 진행/완료 화면 */
-  .job-view {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 16px;
-    text-align: center;
-  }
-  .job-title {
-    color: var(--text-muted);
-  }
-  .bar {
-    width: min(420px, 80%);
-    height: 10px;
-    border-radius: 5px;
-    background: var(--border);
-    overflow: hidden;
-  }
-  .fill {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.2s ease;
-  }
-  .job-meta {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    font-size: 13px;
-    color: var(--text-muted);
-    max-width: 80%;
-  }
-  .job-meta .pct {
-    font-variant-numeric: tabular-nums;
-    font-weight: 600;
-    color: var(--text);
-  }
-  .job-meta .file {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .result {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    padding: 14px 20px;
-    border-radius: 8px;
-  }
-  .result .r-ic {  }
-  .result.ok {
-    background: var(--ok-bg, #e6f4ea);
-    color: var(--ok-text, #1e6b34);
-  }
-  .result.warn {
-    background: var(--warn-bg, #fdf3e0);
-    color: var(--warn-text, #8a5a12);
-  }
-  .result.cancel {
-    background: var(--surface);
-    color: var(--text-muted);
-  }
-  .result.err {
-    background: var(--alert-bg, #fde8e8);
-    color: var(--alert-text, #9b1c1c);
-  }
-  .job-actions {
-    display: flex;
-    gap: 8px;
-  }
 
 </style>

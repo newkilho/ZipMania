@@ -12,6 +12,7 @@
     setCurrentWindowTitle,
   } from "./lib/api.js";
   import { t } from "./lib/i18n.js";
+  import { isEditing } from "./lib/dom.js";
   import {
     engineVersion,
     archivePath,
@@ -20,6 +21,7 @@
     openArchiveByPath,
     closeError,
     initJobEvents,
+    selectAllVisible,
   } from "./lib/stores.js";
 
   import Toolbar from "./components/Toolbar.svelte";
@@ -46,9 +48,16 @@
     setCurrentWindowTitle($t("app.name")).catch(() => {});
   }
 
-  // WebView 기본 우클릭 메뉴 차단, 목록, 트리는 각자 시스템 네이티브 메뉴를 띄운다
-  function onGlobalContextMenu(e) {
+  // Ctrl+A = 목록 전체 선택, 창 수준에서 잡는다 — 목록에 포커스가 없으면
+  // 웹뷰 기본 동작이 화면의 글자를 전부 선택한다
+  function onGlobalKeydown(e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.key !== "a" && e.key !== "A") return;
+    if (isEditing(e.target)) return;
     e.preventDefault();
+    selectAllVisible();
+    // 이어지는 화살표/Shift 조작이 목록에서 먹도록 포커스를 넘긴다
+    document.querySelector('[data-ui="file-list"]')?.focus();
   }
 
   let unlistenDrop = null;
@@ -135,7 +144,7 @@
   });
 </script>
 
-<svelte:window on:contextmenu={onGlobalContextMenu} />
+<svelte:window on:keydown={onGlobalKeydown} />
 
 <Toolbar />
 

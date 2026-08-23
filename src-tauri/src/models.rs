@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use zipmania_archive::{ScanEntry, TestEntry};
+use zipmania_archive::{MissingItem, ScanEntry, TestEntry};
 use serde::{Deserialize, Serialize};
 
 /// 무결성 테스트 결과(test:report), 요약 개수는 프런트가 계산
@@ -21,22 +21,26 @@ pub struct ScanReportEvent {
     pub entries: Vec<ScanEntry>,
 }
 
-/// 작업 진행률, (job:progress 이벤트 페이로드)
+/// 작업 진행률(job:progress), done/total = 바이트, 0 = 미상, 속도/예상시간은 프런트 계산
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobProgress {
     pub job_id: String,
     pub percent: u8,
     pub current_file: String,
+    pub done: u64,
+    pub total: u64,
 }
 
 /// 작업 완료(job:done), status = ok, warning(빠진 항목), canceled(부분 파일 잔존 가능)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// missing = 빠진 항목(상한 MISSING_CAP), missing_total = 자르기 전 개수, 문장은 프런트가 조립
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobDone {
     pub job_id: String,
     pub status: String,
-    pub message: String,
+    pub missing: Vec<MissingItem>,
+    pub missing_total: usize,
 }
 
 /// 작업 오류(job:error), code = ZipManiaError 체계

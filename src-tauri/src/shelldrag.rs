@@ -44,6 +44,27 @@ pub fn resolve_items(
     out
 }
 
+/// DoDragDrop 결과, hr = 반환 HRESULT, effect = 드롭이 실제로 수행한 동작
+/// asked = 드롭 대상이 CF_HDROP 를 요청했나, error = 추출 실패
+#[derive(Debug)]
+pub struct DragOutcome {
+    pub hr: i32,
+    pub effect: u32,
+    pub asked: bool,
+    pub error: Option<zipmania_archive::ZipManiaError>,
+}
+
+impl DragOutcome {
+    fn nothing(hr: i32) -> Self {
+        Self {
+            hr,
+            effect: 0,
+            asked: false,
+            error: None,
+        }
+    }
+}
+
 #[cfg(windows)]
 pub fn do_shell_drag(
     app: tauri::AppHandle,
@@ -51,9 +72,9 @@ pub fn do_shell_drag(
     dll: std::path::PathBuf,
     password: Option<String>,
     items: Vec<DragItem>,
-) -> windows::core::HRESULT {
+) -> DragOutcome {
     if items.is_empty() {
-        return windows::core::HRESULT(0);
+        return DragOutcome::nothing(0);
     }
     imp::run(app, archive, dll, password, items)
 }
@@ -66,8 +87,8 @@ pub fn do_shell_drag(
     _dll: std::path::PathBuf,
     _password: Option<String>,
     _items: Vec<DragItem>,
-) -> i32 {
-    -1
+) -> DragOutcome {
+    DragOutcome::nothing(-1)
 }
 
 #[cfg(windows)]
@@ -92,9 +113,16 @@ mod imp {
     use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
     use windows::Win32::UI::Shell::DROPFILES;
 
-    use zipmania_archive::Router;
+    use zipmania_archive::{Router, ZipManiaError};
 
-    use super::DragItem;
+    use super::{DragItem, DragOutcome};
+
+    /// DoDragDrop 이 끝난 뒤 읽는 공유 상태(콜백은 IDataObject 안에서만 돈다)
+    #[derive(Default)]
+    struct DragState {
+        asked: std::sync::atomic::AtomicBool,
+        error: Mutex<Option<ZipManiaError>>,
+    }
 
     // 표준 HRESULT 상수(윈도우 헤더 값)
     const S_OK: HRESULT = HRESULT(0);
@@ -128,6 +156,7 @@ mod imp {
         password: Option<String>,
         items: Vec<DragItem>,
         temp_dir: Mutex<Option<PathBuf>>,
+        state: std::sync::Arc<DragState>,
     }
 
     impl HdropData {
@@ -142,7 +171,12 @@ mod imp {
                     self.password.as_deref(),
                     &self.items,
                 )
-                .map_err(|_| Error::from(E_FAIL))?;
+                .map_err(|e| {
+                    if let Ok(mut slot) = self.state.error.lock() {
+                        *slot = Some(e);
+                    }
+                    Error::from(E_FAIL)
+                })?;
                 *guard = Some(dir);
             }
             Ok(guard.clone().unwrap())
@@ -155,6 +189,9 @@ mod imp {
 
             // CF_HDROP 요청 → 임시 폴더 해제 후 실제 경로 목록(DROPFILES) 반환
             if fmt.cfFormat == CF_HDROP && (fmt.tymed & TYMED_HGLOBAL.0 as u32) != 0 {
+                self.state
+                    .asked
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 let dir = self.ensure_extracted()?;
                 let paths = top_level_wide_paths(&dir, &self.items);
                 if paths.is_empty() {
@@ -420,7 +457,10 @@ mod imp {
         dll: PathBuf,
         password: Option<String>,
         items: Vec<DragItem>,
-    ) -> HRESULT {
+    ) -> DragOutcome {
+        let state = std::sync::Arc::new(DragState::default());
+        let hr;
+        let mut effect = DROPEFFECT::default();
         unsafe {
             let _ = OleInitialize(None);
 
@@ -431,12 +471,18 @@ mod imp {
                 password,
                 items,
                 temp_dir: Mutex::new(None),
+                state: state.clone(),
             }
             .into();
             let source: IDropSource = DropSource.into();
-            let mut effect = DROPEFFECT::default();
             // 아카이브에서 꺼내는 동작 → 복사(Copy)만 허용
-            DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect)
+            hr = DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect);
+        }
+        DragOutcome {
+            hr: hr.0,
+            effect: effect.0,
+            asked: state.asked.load(std::sync::atomic::Ordering::Relaxed),
+            error: state.error.lock().ok().and_then(|mut s| s.take()),
         }
     }
 }

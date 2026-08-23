@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use zipmania_archive::backend::unegg::Unegg;
-use zipmania_archive::{ArchiveBackend, ExtractOptions, ExtractResult, OverwriteMode};
+use zipmania_archive::{ArchiveBackend, ExtractOptions, ExtractResult, OverwriteMode, Progress};
 
 /// 파이썬 참조 구현과 실측이 일치한 값(README §10)
 const ENTRY_NAME: &str = "EGG_Specification.pdf";
@@ -76,6 +76,54 @@ fn 두_포맷의_해제_결과가_바이트로_동일하다() {
     assert!(from_egg.ends_with(b"%%EOF\n") || from_egg.ends_with(b"\n%%EOF"));
 }
 
+// 탐색기로 드래그, 더블클릭 실행이 쓰는 경로 — 미구현이면 unsupported 로 조용히 실패한다
+#[test]
+fn 단일_항목을_파일로_추출한다() {
+    let d = tempdir("egg_entry");
+    let out = d.join("dragged.pdf");
+    Unegg::new()
+        .extract_entry_to_file(&fixture("test.egg"), ENTRY_NAME, &out, None)
+        .expect("egg 단일 항목 추출 실패");
+    let bytes = std::fs::read(&out).unwrap();
+    assert_eq!(bytes.len(), UNPACKED_SIZE as usize);
+    assert_eq!(&bytes[..8], b"%PDF-1.5");
+
+    let out_alz = d.join("dragged_alz.pdf");
+    Unegg::new()
+        .extract_entry_to_file(&fixture("test.alz"), ENTRY_NAME, &out_alz, None)
+        .expect("alz 단일 항목 추출 실패");
+    assert_eq!(std::fs::read(&out_alz).unwrap(), bytes, "EGG/ALZ 결과가 다르다");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// Shell DnD 지연 렌더링 경로
+#[test]
+fn 단일_항목을_writer_로_흘린다() {
+    let d = tempdir("egg_writer");
+    let out = d.join("streamed.pdf");
+    let f = std::fs::File::create(&out).unwrap();
+    Unegg::new()
+        .extract_entry_to_writer(&fixture("test.egg"), ENTRY_NAME, Box::new(f), None)
+        .expect("egg 스트리밍 추출 실패");
+    let bytes = std::fs::read(&out).unwrap();
+    assert_eq!(bytes.len(), UNPACKED_SIZE as usize);
+    assert_eq!(&bytes[..8], b"%PDF-1.5");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// 없는 항목을 성공으로 두면 드롭 대상에 빈 파일이 생긴다
+#[test]
+fn 없는_항목은_not_found() {
+    let d = tempdir("egg_missing");
+    let out = d.join("nope");
+    let e = Unegg::new()
+        .extract_entry_to_file(&fixture("test.egg"), "없는파일.txt", &out, None)
+        .expect_err("없는 항목인데 성공했다");
+    assert_eq!(e.code, "not_found", "{e:?}");
+    assert!(!out.exists(), "실패했는데 대상 파일이 남았다");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 #[test]
 fn crc_검증이_실제로_동작한다() {
     // read_item 이 블록 CRC 를 검사 → test 통과 = CRC 일치
@@ -96,7 +144,7 @@ fn egg_해제하면_파일이_생긴다() {
         decisions: Default::default(),
     };
     let mut seen_percent = 0u8;
-    let mut prog = |p: u8, _f: Option<String>| seen_percent = seen_percent.max(p);
+    let mut prog = |p: Progress| seen_percent = seen_percent.max(p.percent);
     match Unegg::new().extract(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
         ExtractResult::Done { status, .. } => assert_eq!(status, "ok"),
         ExtractResult::Failed(e) => panic!("해제 실패: {} {}", e.code, e.message),
@@ -122,7 +170,7 @@ fn 이미_있는_파일은_충돌_정책을_따른다() {
         selected: Vec::new(),
         decisions: Default::default(),
     };
-    let mut prog = |_p: u8, _f: Option<String>| {};
+    let mut prog = |_p: Progress| {};
 
     // Skip — 기존 파일 보존
     let _ = Unegg::new().extract(&opts, &mut prog, Arc::new(AtomicBool::new(false)));
@@ -234,7 +282,7 @@ fn 암호_아카이브_해제() {
         selected: Vec::new(),
         decisions: Default::default(),
     };
-    let mut prog = |_p: u8, _f: Option<String>| {};
+    let mut prog = |_p: Progress| {};
     match Unegg::new().extract(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
         ExtractResult::Done { status, .. } => assert_eq!(status, "ok"),
         ExtractResult::Failed(e) => panic!("해제 실패: {} {}", e.code, e.message),
@@ -261,7 +309,7 @@ fn 비밀번호가_틀리면_해제를_즉시_중단한다() {
         selected: Vec::new(),
         decisions: Default::default(),
     };
-    let mut prog = |_p: u8, _f: Option<String>| {};
+    let mut prog = |_p: Progress| {};
     match Unegg::new().extract(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
         ExtractResult::Failed(e) => assert_eq!(e.code, "wrong_password"),
         ExtractResult::Done { status, .. } => panic!("틀린 암호인데 {status} 로 끝났다"),
@@ -323,9 +371,9 @@ fn 목록이_부풀린_크기는_쓰지_않는다() {
         selected: Vec::new(),
         decisions: Default::default(),
     };
-    match Unegg::new().extract(&opts, &mut |_, _| {}, Arc::new(AtomicBool::new(false))) {
-        ExtractResult::Done { status, message } => {
-            assert_eq!(status, "warning", "부풀린 크기를 {status} 로 마감했다: {message}");
+    match Unegg::new().extract(&opts, &mut |_| {}, Arc::new(AtomicBool::new(false))) {
+        ExtractResult::Done { status, missing, .. } => {
+            assert_eq!(status, "warning", "부풀린 크기를 {status} 로 마감했다: {missing:?}");
         }
         ExtractResult::Failed(e) => panic!("해제 실패: {} {}", e.code, e.message),
     }

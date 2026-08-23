@@ -7,10 +7,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::backend::{ExtractOptions, ExtractResult, ProgressFn};
+use crate::backend::{ExtractOptions, ExtractResult, MissingItem, MissingReason, Progress, ProgressFn};
 use crate::error::ZipManiaError;
 use crate::formats::{unique_path, OverwriteMode};
-use crate::inputs::summarize;
 
 use crate::paths;
 
@@ -73,18 +72,12 @@ pub fn extract_all(
     let targets: Vec<&Item> = items.iter().filter(|i| in_scope(i, &opts.selected)).collect();
     let total: u64 = targets.iter().filter(|i| !i.is_dir).map(|i| i.size).sum();
     let mut done: u64 = 0;
-    let mut warned = false;
-    // 신고 크기 != 실제 출력 크기라 기록하지 않은 항목
-    let mut mismatched: Vec<String> = Vec::new();
-    // 아예 생성 못 한 항목(폴더 생성 실패 등)
-    let mut failed: Vec<String> = Vec::new();
+    // 크기 불일치, 생성 실패, 풀지 못한 항목 전부
+    let mut missing: Vec<MissingItem> = Vec::new();
 
     for item in targets {
         if canceled(&cancel) {
-            return ExtractResult::Done {
-                status: "canceled",
-                message: "사용자가 취소했습니다.".into(),
-            };
+            return ExtractResult::canceled();
         }
 
         // 경로 유지 여부로 상대 경로 결정(평면 = 파일명만)
@@ -106,7 +99,11 @@ pub fn extract_all(
             // 폴더 생성 실패도 누락 항목, 넘기면 ok → 앱이 원본 삭제(빈 폴더 정보 소실)
             // zip, 7z 도 이 실패를 기록
             if let Err(e) = fs::create_dir_all(&target) {
-                failed.push(format!("{} ({e})", item.path));
+                missing.push(MissingItem::detailed(
+                    &item.path,
+                    MissingReason::CreateDir,
+                    e.to_string(),
+                ));
             }
             continue;
         }
@@ -127,10 +124,7 @@ pub fn extract_all(
             target
         };
 
-        on_progress(
-            percent(done, total),
-            Some(item.path.clone()),
-        );
+        on_progress(Progress::new(done, total, Some(item.path.clone())));
 
         if let Some(parent) = target.parent() {
             let _ = fs::create_dir_all(parent);
@@ -165,9 +159,10 @@ pub fn extract_all(
                 // 검사 순서: commit 보다 먼저, zip 백엔드도 같은 자리에서 동일 검사
                 if wrote != item.size {
                     staged.abort();
-                    mismatched.push(format!(
-                        "{} ({wrote}바이트, 목록은 {}바이트)",
-                        item.path, item.size
+                    missing.push(MissingItem::detailed(
+                        &item.path,
+                        MissingReason::SizeMismatch,
+                        format!("{wrote} / {}", item.size),
                     ));
                     // 미기록이어도 진행률상 지나간 항목, 빼면 끝에서 100 으로 튐
                     done += item.size;
@@ -182,16 +177,13 @@ pub fn extract_all(
                 staged.abort();
                 // 쓰기 도중 취소, 임시 파일은 위에서 삭제 → 잔류 없음
                 if canceled(&cancel) {
-                    return ExtractResult::Done {
-                        status: "canceled",
-                        message: "사용자가 취소했습니다.".into(),
-                    };
+                    return ExtractResult::canceled();
                 }
                 if e.code == "password_required" || e.code == "wrong_password" {
                     return ExtractResult::Failed(e);
                 }
                 if e.code == "unsupported" || e.code == "corrupt" {
-                    warned = true;
+                    missing.push(MissingItem::new(&item.path, MissingReason::Read));
                     continue;
                 }
                 return ExtractResult::Failed(e);
@@ -201,45 +193,11 @@ pub fn extract_all(
         done += item.size;
     }
 
-    on_progress(100, None);
+    on_progress(Progress::finished(total));
     // 누락 항목 있으면 ok 아님, 앱이 ok 를 보고 [해제 후 원본 삭제] 수행
-    if warned || !mismatched.is_empty() || !failed.is_empty() {
-        let mut parts = Vec::new();
-        if !mismatched.is_empty() {
-            parts.push(format!(
-                "목록과 크기가 달라 쓰지 않은 항목 {}개({})",
-                mismatched.len(),
-                summarize(&mismatched)
-            ));
-        }
-        if !failed.is_empty() {
-            parts.push(format!(
-                "만들지 못한 항목 {}개({})",
-                failed.len(),
-                summarize(&failed)
-            ));
-        }
-        if warned {
-            parts.push("풀지 못한 항목(지원하지 않는 압축 방식이거나 손상)".to_string());
-        }
-        ExtractResult::Done {
-            status: "warning",
-            message: format!("해제를 마쳤지만 일부 항목이 빠졌습니다. {}.", parts.join(" / ")),
-        }
-    } else {
-        ExtractResult::Done {
-            status: "ok",
-            message: "해제를 완료했습니다.".into(),
-        }
-    }
+    ExtractResult::finish(missing)
 }
 
-fn percent(done: u64, total: u64) -> u8 {
-    if total == 0 {
-        return 0;
-    }
-    ((done.saturating_mul(100) / total).min(100)) as u8
-}
 
 
 #[cfg(test)]
@@ -282,18 +240,21 @@ mod dir_tests {
             decisions: Default::default(),
         };
         let items = [dir_item("docs")];
-        let r = extract_all(&[], &items, &opts, &mut |_, _| {}, Arc::new(AtomicBool::new(false)));
+        let r = extract_all(&[], &items, &opts, &mut |_| {}, Arc::new(AtomicBool::new(false)));
         match r {
-            ExtractResult::Done { status, message } => {
+            ExtractResult::Done { status, missing, .. } => {
                 assert_eq!(status, "warning", "폴더를 못 만들었는데 {status} 로 끝났다");
-                assert!(message.contains("docs"), "무엇이 빠졌는지 알려 주지 않는다: {message}");
+                assert!(
+                    missing.iter().any(|m| m.path.contains("docs")),
+                    "무엇이 빠졌는지 알려 주지 않는다: {missing:?}"
+                );
             }
             ExtractResult::Failed(e) => panic!("해제 실패: {} {}", e.code, e.message),
         }
 
         // 정상 폴더 = 생성 성공 + ok
         let items = [dir_item("사진")];
-        let r = extract_all(&[], &items, &opts, &mut |_, _| {}, Arc::new(AtomicBool::new(false)));
+        let r = extract_all(&[], &items, &opts, &mut |_| {}, Arc::new(AtomicBool::new(false)));
         assert!(matches!(r, ExtractResult::Done { status: "ok", .. }));
         assert!(dest.join("사진").is_dir());
 

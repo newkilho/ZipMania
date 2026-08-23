@@ -5,6 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::backend::{MissingItem, MissingReason};
+
 /// 압축 항목 1개, 백엔드가 자기 표현으로 변환
 #[derive(Debug, Clone)]
 pub struct InputItem {
@@ -16,7 +18,7 @@ pub struct InputItem {
 }
 
 /// 폴더와 파일 입력 재귀 수집, 2번째 값 = 누락분(링크, 읽기 실패, 이름 없음)
-pub fn collect(inputs: &[String]) -> (Vec<InputItem>, Vec<String>) {
+pub fn collect(inputs: &[String]) -> (Vec<InputItem>, Vec<MissingItem>) {
     let mut items = Vec::new();
     let mut skipped = Vec::new();
     for input in inputs {
@@ -27,7 +29,7 @@ pub fn collect(inputs: &[String]) -> (Vec<InputItem>, Vec<String>) {
             .unwrap_or_default();
         // 이름 못 뽑는 입력(드라이브 루트 C:\, ..), 조용히 넘기면 결과가 ok → 원본 삭제 허용
         if base.is_empty() {
-            skipped.push(format!("{input} (이름을 알 수 없는 경로입니다)"));
+            skipped.push(MissingItem::new(input, MissingReason::Unnamed));
             continue;
         }
         // 최상위 입력 = 링크여도 추적(사용자 선택), 하위 링크 = 제외
@@ -44,13 +46,13 @@ pub fn collect(inputs: &[String]) -> (Vec<InputItem>, Vec<String>) {
             });
         } else {
             // 폴더도 파일도 아님(소실, 읽기 실패) → 누락 보고, 조용히 넘기면 ok
-            skipped.push(format!("{input} (없거나 읽을 수 없습니다)"));
+            skipped.push(MissingItem::new(input, MissingReason::Missing));
         }
     }
     (items, skipped)
 }
 
-fn add_dir(items: &mut Vec<InputItem>, dir: &Path, rel: &str, skipped: &mut Vec<String>) {
+fn add_dir(items: &mut Vec<InputItem>, dir: &Path, rel: &str, skipped: &mut Vec<MissingItem>) {
     items.push(InputItem {
         name: rel.to_string(),
         source: None,
@@ -61,7 +63,7 @@ fn add_dir(items: &mut Vec<InputItem>, dir: &Path, rel: &str, skipped: &mut Vec<
     let read = match std::fs::read_dir(dir) {
         Ok(r) => r,
         Err(e) => {
-            skipped.push(format!("{rel} (폴더를 읽지 못함: {e})"));
+            skipped.push(MissingItem::detailed(rel, MissingReason::DirRead, e.to_string()));
             return;
         }
     };
@@ -70,7 +72,7 @@ fn add_dir(items: &mut Vec<InputItem>, dir: &Path, rel: &str, skipped: &mut Vec<
         let entry = match entry {
             Ok(x) => x,
             Err(e) => {
-                skipped.push(format!("{rel} (항목을 읽지 못함: {e})"));
+                skipped.push(MissingItem::detailed(rel, MissingReason::EntryRead, e.to_string()));
                 continue;
             }
         };
@@ -81,12 +83,16 @@ fn add_dir(items: &mut Vec<InputItem>, dir: &Path, rel: &str, skipped: &mut Vec<
         let meta = match std::fs::symlink_metadata(&child) {
             Ok(m) => m,
             Err(e) => {
-                skipped.push(format!("{child_rel} (정보를 읽지 못함: {e})"));
+                skipped.push(MissingItem::detailed(
+                    &child_rel,
+                    MissingReason::Stat,
+                    e.to_string(),
+                ));
                 continue;
             }
         };
         if meta.file_type().is_symlink() {
-            skipped.push(format!("{child_rel} (링크)"));
+            skipped.push(MissingItem::new(&child_rel, MissingReason::Link));
             continue;
         }
 
@@ -104,11 +110,3 @@ fn add_dir(items: &mut Vec<InputItem>, dir: &Path, rel: &str, skipped: &mut Vec<
     }
 }
 
-/// 앞 3개 + 외 N개, 전체 나열 시 메시지 수천 자, 백엔드 둘의 형식 통일용
-pub fn summarize(items: &[String]) -> String {
-    const HEAD: usize = 3;
-    if items.len() <= HEAD {
-        return items.join(", ");
-    }
-    format!("{}, 외 {}개", items[..HEAD].join(", "), items.len() - HEAD)
-}

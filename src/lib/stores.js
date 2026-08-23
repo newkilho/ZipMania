@@ -3,6 +3,7 @@
 
 import { writable, derived, get } from "svelte/store";
 import { t, errText } from "./i18n.js";
+import { missingLines } from "./format.js";
 import {
   openArchive,
   startTest as startTestApi,
@@ -146,6 +147,8 @@ let pendingPasswordPath = null;
 let pendingExtractOptions = null;
 // 테스트 암호 재시도용 아카이브 경로(모듈 내부)
 let pendingTestArchive = null;
+// 항목 열기 암호 재시도용 내부 경로(모듈 내부)
+let pendingEntryPath = null;
 
 // ─── 파생 상태 ─────────────────────────────────────────────
 
@@ -423,7 +426,8 @@ export async function openDroppedPaths(paths) {
 }
 
 /**
- * 암호 다이얼로그 제출 → mode 에 따라 열기(open) 또는 해제(extract) 재시도
+ * 암호 다이얼로그 제출 → mode 에 따라 열기(open), 해제(extract), 테스트(test), 검사(scan),
+ * 항목 열기(entry) 재시도
  */
 export async function submitPassword(pw) {
   const mode = get(passwordState).mode;
@@ -439,6 +443,9 @@ export async function submitPassword(pw) {
     if (!pendingScanArchive) return;
     passwordState.set({ open: false, error: null, mode: "open" });
     await runScanJob(pendingScanArchive, pw);
+  } else if (mode === "entry") {
+    if (!pendingEntryPath) return;
+    await openInnerEntry(pendingEntryPath, pw);
   } else {
     if (!pendingPasswordPath) return;
     await openArchiveByPath(pendingPasswordPath, pw);
@@ -452,6 +459,7 @@ export function cancelPassword() {
   pendingExtractOptions = null;
   pendingTestArchive = null;
   pendingScanArchive = null;
+  pendingEntryPath = null;
 }
 
 // ─── 해제 ─────────────────────────────────────────────
@@ -595,7 +603,10 @@ export async function initJobEvents() {
     }
     // 편집 성공은 목록에 바로 보이므로 토스트 생략
     if (isEdit && d.status !== "canceled") return;
-    const msg = d.status === "canceled" ? tr("progress.canceled") : tr("progress.done");
+    // 빠진 항목이 있으면 요약 한 줄(상세는 해제 창 로그), 없으면 상태 문구
+    const missing = missingLines(tr, d.missing, d.missingTotal);
+    const msg =
+      d.status === "canceled" ? tr("progress.canceled") : missing[0] || tr("progress.done");
     jobResult.set({ status: d.status, message: msg });
   });
 
@@ -926,17 +937,36 @@ export async function extractAllToArchiveFolder() {
 
 /**
  * 파일 1개를 %TEMP% 에 풀어 열기, 아카이브면 새 창(판정은 백엔드 정본), 임시 폴더는 종료 시 삭제
+ * @param {string} path 내부 경로
+ * @param {string} [password] 암호 재질의 값, 생략 시 세션 암호
  */
-export async function openInnerEntry(path) {
+export async function openInnerEntry(path, password) {
   const archive = get(archivePath);
   if (!archive) return;
   try {
-    const nested = await openEntry(archive, path);
+    const nested = await openEntry(archive, path, password);
+    // 암호 창 경유 시에만 닫기(다른 흐름이 연 창은 그대로)
+    if (get(passwordState).mode === "entry") {
+      passwordState.set({ open: false, error: null, mode: "open" });
+      pendingEntryPath = null;
+    }
     if (nested) await openArchiveWindow(nested);
   } catch (err) {
-    const message =
-      typeof err === "string" && err ? err : get(t)("errors.openEntryFailed");
-    jobResult.set({ status: "error", message });
+    const code = err && err.code;
+    // 암호 필요/틀림 → 암호 창, 입력값으로 재시도
+    if (code === "password_required" || code === "wrong_password") {
+      pendingEntryPath = path;
+      passwordState.set({
+        open: true,
+        error: code === "wrong_password" ? get(t)("errors.wrong_password") : null,
+        mode: "entry",
+      });
+      return;
+    }
+    jobResult.set({
+      status: "error",
+      message: errText(get(t), code, get(t)("errors.openEntryFailed")),
+    });
   }
 }
 

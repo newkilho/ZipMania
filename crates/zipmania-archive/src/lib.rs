@@ -19,7 +19,8 @@ pub use backend::sevenzip::SevenZip;
 pub use backend::unegg::Unegg;
 pub use backend::unzip::Unzip;
 pub use backend::{
-    ArchiveBackend, CreateOptions, CreateResult, EditOptions, ExtractOptions, ExtractResult, Router,
+    ArchiveBackend, CreateOptions, CreateResult, EditOptions, ExtractOptions, ExtractResult,
+    MissingItem, MissingReason, Progress, Router, MISSING_CAP,
 };
 pub use error::{ZipManiaError, SevenZipError};
 pub use formats::{is_archive_path, CompressFormat, OverwriteMode, ScanFn, READ_EXTS};

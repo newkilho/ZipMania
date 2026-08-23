@@ -4,6 +4,9 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { get } from "svelte/store";
   import { t, errText } from "../lib/i18n.js";
+  import { missingLines } from "../lib/format.js";
+  import { newMeter, sample } from "../lib/progress.js";
+  import JobView from "./JobView.svelte";
   import FolderPicker from "./FolderPicker.svelte";
   import {
     takeExtractContext,
@@ -18,7 +21,7 @@
     onJobError,
     onExtractContext,
     closeCurrentWindow,
-    centerCurrentWindow,
+    resizeCurrentWindow,
     setCurrentWindowTitle,
     getSettings,
     saveSettings,
@@ -61,7 +64,6 @@
   let batchMode = false;
   let batchItems = []; // [{ archive, dest }]
   let batchIndex = 0;
-  let batchLog = []; // 배치 진행 로그
   // 배치 중 경고/오류/건너뜀 여부, 마지막 항목 상태로 전체를 덮지 않음 — ok = 원본 삭제 허용
   let batchIssue = false;
 
@@ -75,8 +77,13 @@
   let startError = "";
 
   // 진행/완료 로그 및 시간
-  let logLines = []; // 진행 상황 로그(시작/현재 파일/완료/소요시간)
-  let startedAt = 0; // 작업 시작 시각(ms)
+  // 빠진 항목, 건너뛴 항목 안내 — 로그 대신 결과 화면에만, 배치는 항목 넘어가도 누적
+  let missingShown = [];
+  // 처리량/속도 — done, total 은 백엔드가 주는 바이트(0 = 미상)
+  let jobDone = 0;
+  let jobTotal = 0;
+  let meter = null;
+  let ticker = null;
   let elapsedSec = 0; // 소요 시간(초)
   // 완료 후 동작, settings.toml 에 즉시 저장되고 이번 작업에는 완료 시점 값이 쓰인다
   let autoClose = false; // 성공 시 창닫기
@@ -100,22 +107,14 @@
   let passwordError = "";
 
   let centeredOnce = false; // 창 중앙 정렬을 1회만 하기 위한 플래그
+
+  // 폼/진행 화면 창 크기, 폼 값 = Rust open_extract_window 의 inner_size 와 동일 필요
+  const FORM_SIZE = [640, 600];
+  const JOB_SIZE = [520, 340];
   let unlistenJobs = [];
 
   // jobId 배정 전 도착한 이벤트 버퍼, 즉시 실패 시 job:error 가 jobId 대입보다 선행
   let pendingEvents = [];
-
-  // 완료 로그 박스의 상태색 클래스(성공=연초록 / 경고=연노랑 / 오류=연빨강)
-  $: resultCls =
-    jobResult == null
-      ? ""
-      : jobResult.status === "ok"
-        ? "ok"
-        : jobResult.status === "warning"
-          ? "warn"
-          : jobResult.status === "canceled"
-            ? "cancel"
-            : "err";
 
   /**
    * 지금 새 요청 수용 가능 여부, 충돌 검사/암호 창/충돌 창까지 전부 진행 중
@@ -189,8 +188,9 @@
     if (kind === "progress") {
       jobPercent = ev.percent;
       jobFile = ev.currentFile;
+      onProgressBytes(ev);
     } else if (kind === "done") {
-      onJobFinished(ev.status, ev.message);
+      onJobFinished(ev);
     } else {
       onJobErrored(ev);
     }
@@ -207,7 +207,7 @@
   function onJobErrored(e) {
     // 배치 = 이 아카이브 실패를 로그로 남기고 다음으로
     if (batchMode && e.code !== "password_required" && e.code !== "wrong_password") {
-      batchLog = [...batchLog, "  ⚠ " + errText(get(t), e.code, e.message)];
+      note(errText(get(t), e.code, e.message));
       batchIssue = true;
       if (batchIndex < batchItems.length - 1) {
         batchIndex++;
@@ -215,7 +215,6 @@
       } else {
         phase = "done";
         jobResult = { status: "warning", message: "" };
-        logLines = [...batchLog, get(t)("extract.doneEnd")];
       }
       return;
     }
@@ -322,7 +321,7 @@
     jobPercent = 0;
     jobFile = "";
     jobResult = null;
-    logLines = [];
+    resetProgress();
     startError = "";
     needPassword = false;
     passwordError = "";
@@ -333,10 +332,14 @@
     batchMode = false;
     batchItems = [];
     batchIndex = 0;
-    batchLog = [];
     batchIssue = false;
     autoMode = false;
     starting = false;
+    // 진행 화면에서 줄인 창을 폼 크기로 복원, 미복원 시 560×380 폼
+    if (phase !== "form") {
+      centeredOnce = false;
+      resizeCurrentWindow(...FORM_SIZE).catch(() => {});
+    }
     phase = "form";
     ready = false;
 
@@ -363,8 +366,6 @@
     password = "";
     conflictsChecked = false; // 앞 항목의 검사 결과를 물려받지 않는다
     decisions = {};
-    batchLog = [...batchLog, `(${batchIndex + 1}/${batchItems.length}) ${fileNameOf(item.archive)}`];
-    logLines = batchLog;
     await tick();
     // 항목마다 충돌 확인, 겹치면 질의, 취소 시 다음 항목으로
     await confirmThenExtract();
@@ -378,6 +379,7 @@
   }
 
   onDestroy(() => {
+    stopTicker();
     for (const off of unlistenJobs) off && off();
   });
 
@@ -471,7 +473,6 @@
       } else {
         phase = "done";
         jobResult = { status: "error", message: msg };
-        logLines = [...logLines, msg];
       }
       return;
     }
@@ -511,7 +512,7 @@
       if (code !== "password_required" && code !== "wrong_password") {
         const msg = errText(get(t), code, checkError && checkError.message);
         if (batchMode) {
-          batchLog = [...batchLog, "  ⚠ " + msg];
+          note(msg);
           batchIssue = true;
           if (batchIndex < batchItems.length - 1) {
             batchIndex++;
@@ -520,12 +521,10 @@
           }
           phase = "done";
           jobResult = { status: "warning", message: "" };
-          logLines = [...batchLog, get(t)("extract.doneEnd")];
           return;
         }
         phase = "done";
         jobResult = { status: "error", message: msg };
-        logLines = [...logLines, msg];
         return;
       }
     }
@@ -579,11 +578,10 @@
         // 빠른 해제는 폼 부재 — 사용자 취소이므로 아무 동작 없이 마감
         phase = "done";
         jobResult = { status: "canceled", message: "" };
-        logLines = [...logLines, get(t)("extract.doneCanceled")];
       }
       return;
     }
-    batchLog = [...batchLog, "  ⚠ " + get(t)("extract.conflictSkipped", { name: fileNameOf(archive) })];
+    note(get(t)("extract.conflictSkipped", { name: fileNameOf(archive) }));
     batchIssue = true;
     if (batchIndex < batchItems.length - 1) {
       batchIndex++;
@@ -591,7 +589,6 @@
     } else {
       phase = "done";
       jobResult = { status: "warning", message: "" };
-      logLines = [...batchLog, get(t)("extract.doneEnd")];
     }
   }
 
@@ -617,14 +614,12 @@
       jobFile = "";
       jobResult = null;
       needPassword = false;
-      if (!batchMode) logLines = [get(t)("extract.logStart")];
-      startedAt = Date.now();
-      elapsedSec = 0;
+      startProgress();
       phase = "running";
-      // 시작 시 창을 화면 중앙으로, 첫 시작에만 — 재시도마다 옮기면 화면이 튄다
+      // 진행 화면은 폴더 트리가 없어 훨씬 작다 — 첫 시작에만 줄인다(재시도마다 옮기면 화면이 튄다)
       if (!centeredOnce) {
         centeredOnce = true;
-        centerCurrentWindow().catch(() => {});
+        resizeCurrentWindow(...JOB_SIZE).catch(() => {});
       }
       // jobId 확정 시점, 그 사이 먼저 도착한 이벤트 처리
       drainPendingEvents();
@@ -636,7 +631,6 @@
       if (phase !== "form") {
         phase = "done";
         jobResult = { status: "error", message: msg };
-        logLines = [...logLines, msg];
       }
     }
   }
@@ -660,7 +654,7 @@
     needPassword = false;
     passwordError = "";
     if (batchMode) {
-      batchLog = [...batchLog, "  ⚠ " + get(t)("extract.passwordSkipped", { name: fileNameOf(archive) })];
+      note(get(t)("extract.passwordSkipped", { name: fileNameOf(archive) }));
       batchIssue = true;
       if (batchIndex < batchItems.length - 1) {
         batchIndex++;
@@ -669,34 +663,78 @@
       }
       phase = "done";
       jobResult = { status: "warning", message: "" };
-      logLines = [...batchLog, get(t)("extract.doneEnd")];
       return;
     }
     phase = "done";
     jobResult = { status: "canceled", message: "" };
-    logLines = [...logLines, get(t)("extract.doneCanceled")];
   }
 
-  /** 작업 완료 처리 — 로그 마감 + "압축 파일 삭제", "창닫기", "대상 폴더 열기" 옵션 반영, */
-  async function onJobFinished(status, message) {
+  /** 결과 화면에 남길 안내 한 줄(빠진 항목, 건너뛴 항목) */
+  function note(line) {
+    missingShown = [...missingShown, line];
+  }
+
+  /** 진행 표시 초기화(다음 작업 준비) */
+  function resetProgress() {
+    stopTicker();
+    meter = null;
+    jobDone = 0;
+    jobTotal = 0;
+    elapsedSec = 0;
+    missingShown = [];
+  }
+
+  /** 이 작업의 시계 시작 */
+  function startProgress() {
+    meter = newMeter(Date.now());
+    stopTicker();
+    ticker = setInterval(() => {
+      if (meter) elapsedSec = (Date.now() - meter.startMs) / 1000;
+    }, 1000);
+  }
+
+  function stopTicker() {
+    if (ticker) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  }
+
+  /** job:progress 의 바이트 반영 — 속도는 표본 간격을 두고 갱신 */
+  function onProgressBytes(ev) {
+    jobDone = ev.done || 0;
+    jobTotal = ev.total || 0;
+    meter = sample(meter, jobDone, Date.now());
+  }
+
+  /** 작업 종료 — 시계를 멈추고 경과 시간을 확정 */
+  function finishProgress() {
+    if (meter) elapsedSec = (Date.now() - meter.startMs) / 1000;
+    stopTicker();
+  }
+
+  /** 작업 완료 처리 — "압축 파일 삭제", "창닫기", "대상 폴더 열기" 옵션 반영, */
+  async function onJobFinished(ev) {
     // 마감이 끝날 때까지 busy 유지(await 여럿), 안 그러면 뒤늦은 자동 닫기가 새 작업의 창을 닫는다
     finishing = true;
     try {
-      await finishJob(status, message);
+      await finishJob(ev);
     } finally {
       finishing = false;
     }
   }
 
-  async function finishJob(status, message) {
+  /** @param {{status:string, missing?:Array, missingTotal?:number}} ev job:done 페이로드 */
+  async function finishJob(ev) {
+    const status = ev.status;
+    // 빠진 항목 = 사실 목록, 문장 조립은 missingLines 한 곳
+    const missing = missingLines(get(t), ev.missing, ev.missingTotal);
     // 배치("각각 풀기"): 이 항목 마감 후 다음 항목으로 넘어가거나, 마지막이면 종료
     if (batchMode) {
       // 취소 = 배치 전체의 취소, 계속 풀면 멈추라고 한 일이 끝까지 진행
       if (status === "canceled") {
-        batchLog = [...batchLog, "  ⨯ " + get(t)("extract.doneCanceled")];
         phase = "done";
         jobResult = { status: "canceled", message: "" };
-        logLines = [...batchLog, get(t)("extract.doneCanceled")];
         return;
       }
       // 삭제는 ok 일 때만, warning = 빠진 항목 존재
@@ -709,7 +747,7 @@
       }
       if (status !== "ok") {
         batchIssue = true;
-        if (message) batchLog = [...batchLog, "  ⚠ " + message];
+        missingShown = [...missingShown, ...missing];
       }
       if (batchIndex < batchItems.length - 1) {
         batchIndex++;
@@ -717,47 +755,44 @@
         return;
       }
       phase = "done";
+      finishProgress();
       // 앞 항목의 경고, 오류는 마지막 항목이 성공해도 사라지지 않는다
-      jobResult = { status: batchIssue ? "warning" : "ok", message: "" };
-      logLines = [...batchLog, get(t)("extract.doneEnd")];
+      jobResult = { status: batchIssue ? "warning" : "ok", message: get(t)("extract.doneEnd") };
       return;
     }
 
-    elapsedSec = startedAt ? (Date.now() - startedAt) / 1000 : 0;
+    finishProgress();
     const ok = status === "ok" || status === "warning";
 
     // 성공 시 진행률 100 마감, 작은 아카이브는 진행률 콜백이 한 번도 오지 않는다, 취소, 오류는 그대로
     if (ok) jobPercent = 100;
 
     const tr = get(t);
-    const lines = [...logLines];
-    // 완료/취소 메시지 = 상태 기반 번역(백엔드 원문은 한국어 고정)
-    lines.push(
-      status === "canceled"
-        ? tr("extract.doneCanceled")
-        : status === "warning"
-          ? tr("extract.doneWarn")
-          : ok
-            ? tr("extract.doneOk")
-            : tr("extract.doneEnd"),
-    );
-    // 누락 내용은 백엔드 메시지에만 존재, 삼키면 사용자 확인 불가
-    if (status === "warning" && message) lines.push(message);
+    // 빠진 항목은 이벤트에만 존재, 삼키면 사용자 확인 불가
+    missingShown = [...missingShown, ...missing];
 
     // "압축 파일 삭제" 옵션 — ok 일 때만(warning 은 일부 항목이 빠진 상태다)
     if (status === "ok" && deleteAfter) {
       try {
         await deleteFile(archive);
-        lines.push(tr("extract.logDeleted"));
       } catch (err) {
-        lines.push(tr("extract.logDeleteFailed") + ((err && err.message) || err));
+        missingShown = [...missingShown, tr("extract.logDeleteFailed") + ((err && err.message) || err)];
       }
     }
-    lines.push(tr("extract.logElapsed", { sec: elapsedSec.toFixed(1) }));
-    logLines = lines;
 
     phase = "done";
-    jobResult = { status, message };
+    // 완료/취소 문구 = 상태 기반 번역(백엔드는 문장을 주지 않는다)
+    jobResult = {
+      status,
+      message:
+        status === "canceled"
+          ? tr("extract.doneCanceled")
+          : status === "warning"
+            ? tr("extract.doneWarn")
+            : ok
+              ? tr("extract.doneOk")
+              : tr("extract.doneEnd"),
+    };
 
     // 완료 후 옵션 처리
     if (ok && openFolderAfter) {
@@ -879,44 +914,42 @@
           {checking ? $t("common.checking") : $t("common.confirm")}
         </button>
       </div>  {:else}
-    <!-- 진행/완료 화면 (참고 이미지: 진행률 바 + 로그 영역 + 소요 시간) -->
-    <div class="prog">
-      <div class="prog-body">
-        <div class="prog-label">{$t("extract.progressLabel", { pct: jobPercent })}</div>
-        <div class="bar"><div class="fill" style="width: {jobPercent}%"></div></div>
-        {#if phase === "running"}
-          <div class="cur-file" title={jobFile}>{jobFile || $t("progress.preparing")}</div>
-        {/if}
-        {#if startError && phase !== "form"}
-          <div class="start-error" role="alert">⚠ {startError}</div>
-        {/if}
-        <div class="log {resultCls}">
-          {#each logLines as line}
-            <div class="log-line">{line}</div>
-          {/each}
-        </div>
+    <!-- 진행/완료 화면 — 압축 창과 같은 컴포넌트(JobView), 버튼만 다르다 -->
+    <JobView
+      {phase}
+      title={$t("progress.extracting")}
+      badge={batchMode ? $t("progress.batchItem", { index: batchIndex + 1, count: batchItems.length }) : ""}
+      percent={jobPercent}
+      done={jobDone}
+      total={jobTotal}
+      {meter}
+      {elapsedSec}
+      file={jobFile}
+      result={jobResult}
+      missing={missingShown}
+    >
+      <svelte:fragment slot="notice">
+        {#if startError}<div class="start-error" role="alert">⚠ {startError}</div>{/if}
+      </svelte:fragment>
+      <div slot="options" class="opts">
+        <label class="check sm">
+          <input type="checkbox" bind:checked={autoClose} on:change={persistAfterOptions} />
+          {$t("extract.optClose")}
+        </label>
+        <label class="check sm">
+          <input type="checkbox" bind:checked={openFolderAfter} on:change={persistAfterOptions} />
+          {$t("extract.openDestFolder")}
+        </label>
       </div>
-
-      <div class="prog-actions">
-        <div class="opts">
-          <label class="check sm">
-            <input type="checkbox" bind:checked={autoClose} on:change={persistAfterOptions} />
-            {$t("extract.optClose")}
-          </label>
-          <label class="check sm">
-            <input type="checkbox" bind:checked={openFolderAfter} on:change={persistAfterOptions} />
-            {$t("extract.openDestFolder")}
-          </label>
-        </div>
-        <div class="spacer"></div>
+      <svelte:fragment slot="actions">
         {#if phase === "running"}
           <button class="ghost" on:click={onCancelJob}>{$t("common.cancel")}</button>
         {:else}
           <button class="ghost" on:click={onOpenDest}>{$t("extract.openDestFolder")}</button>
           <button class="primary" on:click={onClose}>{$t("common.close")}</button>
         {/if}
-      </div>
-    </div>
+      </svelte:fragment>
+    </JobView>
   {/if}
 
   <!--
@@ -1171,77 +1204,7 @@
     color: var(--accent-contrast);
     border-color: var(--accent);
   }
-  /* 진행/완료 화면 (참고 이미지: 진행률 바 + 로그 영역) */
-  .prog {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .prog-body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px 18px;
-  }
-  .prog-label {
-    font-size: 13px;
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
-  .bar {
-    width: 100%;
-    height: 16px;
-    border-radius: 4px;
-    background: var(--border);
-    overflow: hidden;
-  }
-  .fill {
-    height: 100%;
-    background: var(--progress-success);
-    transition: width 0.2s ease;
-  }
-  .cur-file {
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* 로그 박스 — 완료 시 상태색(성공=연초록/오류=연빨강)으로 배경을 물들인다, */
-  .log {
-    flex: 1;
-    min-height: 80px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--btn-bg);
-    padding: 8px 10px;    line-height: 1.7;
-  }
-  .log-line {
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-  .log.ok {
-    background: var(--ok-bg, #e6f4ea);
-    color: var(--ok-text, #1e6b34);
-  }
-  .log.warn {
-    background: var(--warn-bg, #fdf3e0);
-    color: var(--warn-text, #8a5a12);
-  }
-  .log.err {
-    background: var(--alert-bg, #fde8e8);
-    color: var(--alert-text, #9b1c1c);
-  }
-  .prog-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 18px;
-    border-top: 1px solid var(--border);
-  }
+  /* 진행/완료 화면 본체는 JobView, 여기는 그 안에 넣는 것들만 */
   .opts {
     display: flex;
     gap: 14px;

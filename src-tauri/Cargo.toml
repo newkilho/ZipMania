@@ -1,6 +1,6 @@
 [package]
 name = "zipmania"
-version = "0.9.0"
+version = "0.9.1"
 description = "ZipMania - 현대적 Windows 압축 프로그램"
 authors = ["BNO Corp"]
 edition = "2021"

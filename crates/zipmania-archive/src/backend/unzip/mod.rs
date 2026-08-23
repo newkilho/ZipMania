@@ -30,7 +30,7 @@ use crate::models::{ArchiveEntry, ScanEntry, TestEntry};
 
 use super::{
     ArchiveBackend, CreateOptions, CreateResult, EditOptions, ExtractOptions, ExtractResult,
-    ProgressFn,
+    Progress, ProgressFn,
 };
 
 /// 열린 zip 아카이브(디스크 파일 기반)
@@ -236,12 +236,6 @@ fn canceled(cancel: &Arc<AtomicBool>) -> bool {
     cancel.load(Ordering::Relaxed)
 }
 
-fn percent(done: u64, total: u64) -> u8 {
-    if total == 0 {
-        return 0;
-    }
-    ((done.saturating_mul(100) / total).min(100)) as u8
-}
 
 impl ArchiveBackend for Unzip {
     fn id(&self) -> &'static str {
@@ -326,7 +320,7 @@ impl ArchiveBackend for Unzip {
         let report = self.test_report(
             archive,
             password,
-            &mut |_, _| {},
+            &mut |_| {},
             Arc::new(AtomicBool::new(false)),
         )?;
         if report.iter().any(|e| !e.ok) {
@@ -387,7 +381,7 @@ impl ArchiveBackend for Unzip {
                 continue;
             }
 
-            on_progress(percent(done, total), Some(name.clone()));
+            on_progress(Progress::new(done, total, Some(name.clone())));
 
             let mut crc = Crc32::new();
             let mut size = 0u64;
@@ -440,7 +434,7 @@ impl ArchiveBackend for Unzip {
                 ok,
             });
         }
-        on_progress(100, None);
+        on_progress(Progress::finished(total));
         Ok(out)
     }
 
@@ -475,7 +469,7 @@ impl ArchiveBackend for Unzip {
             if is_dir {
                 continue;
             }
-            on_progress(percent(i as u64, count as u64), Some(name.clone()));
+            on_progress(Progress::new(i as u64, count as u64, Some(name.clone())));
 
             // 상한 초과 항목 = 미검사로 보고, 안전에 포함 금지
             if max_size != 0 && size >= max_size {
@@ -526,7 +520,8 @@ impl ArchiveBackend for Unzip {
                 status,
             });
         }
-        on_progress(100, None);
+        // 검사 진행률 단위 = 항목 수(바이트 아님)
+        on_progress(Progress::finished(count as u64));
         Ok(out)
     }
 

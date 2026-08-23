@@ -278,7 +278,8 @@ mod ext_tests {
         };
         assert_matches(
             "src/lib/api.js 의 열기 다이얼로그 필터",
-            quoted_between(&src, "name: \"압축 파일\",", "]"),
+            // 앵커는 따옴표가 닫힌 뒤로 — 열린 채로 시작하면 토큰이 한 칸씩 밀린다
+            quoted_between(&src, "dialog.archiveFiles\"),", "]"),
         );
     }
 }

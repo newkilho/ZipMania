@@ -342,6 +342,33 @@ pub(crate) fn inner_rel_path(inner: &str) -> Option<PathBuf> {
     zipmania_archive::paths::sanitize(inner).ok()
 }
 
+/// \\?\ 접두사 제거, \\?\UNC\서버\공유 = \\서버\공유, 그 외 접두사는 그대로
+/// 셸(탐색기 CF_HDROP, explorer 실행)은 verbatim 경로를 파싱하지 못한다(D3.15)
+fn strip_verbatim(p: PathBuf) -> PathBuf {
+    use std::path::{Component, Prefix};
+    let mut comps = p.components();
+    let Some(Component::Prefix(pre)) = comps.next() else {
+        return p;
+    };
+    let head = match pre.kind() {
+        Prefix::VerbatimDisk(d) => format!(r"{}:\", d as char),
+        Prefix::VerbatimUNC(server, share) => format!(
+            r"\\{}\{}\",
+            server.to_string_lossy(),
+            share.to_string_lossy()
+        ),
+        _ => return p,
+    };
+    let mut out = PathBuf::from(head);
+    for c in comps {
+        if matches!(c, Component::RootDir) {
+            continue;
+        }
+        out.push(c.as_os_str());
+    }
+    out
+}
+
 /// 내부 경로 → base 하위 실제 출력 경로, sanitize + resolve_under 둘 다, 루트 자신이 링크면 거부
 /// 앱 열기, 드래그, CF_HDROP 공용 진입점, 분기 사용 금지(D3.14)
 pub(crate) fn inner_dest_path(base: &Path, inner: &str) -> Option<PathBuf> {
@@ -352,7 +379,10 @@ pub(crate) fn inner_dest_path(base: &Path, inner: &str) -> Option<PathBuf> {
         return None;
     }
     let rel = inner_rel_path(inner)?;
-    zipmania_archive::paths::resolve_under(base, &rel).ok()
+    // resolve_under 는 루트를 canonicalize 한다 = 실재하면 \\?\ 가 붙는다
+    zipmania_archive::paths::resolve_under(base, &rel)
+        .ok()
+        .map(strip_verbatim)
 }
 
 /// 세션 암호 조회(아카이브 일치 시)
@@ -522,13 +552,15 @@ pub fn start_test(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |percent: u8, current_file: Option<String>| {
+        let mut on_progress = |p: zipmania_archive::Progress| {
             let _ = app_bg.emit(
                 "job:progress",
                 JobProgress {
                     job_id: job_for_thread.clone(),
-                    percent,
-                    current_file: current_file.unwrap_or_default(),
+                    percent: p.percent,
+                    current_file: p.current_file.unwrap_or_default(),
+                    done: p.done,
+                    total: p.total,
                 },
             );
         };
@@ -630,13 +662,15 @@ pub fn start_scan(
         };
 
         let router = Router::new(dll);
-        let mut on_progress = |percent: u8, current_file: Option<String>| {
+        let mut on_progress = |p: zipmania_archive::Progress| {
             let _ = app_bg.emit(
                 "job:progress",
                 JobProgress {
                     job_id: job_for_thread.clone(),
-                    percent,
-                    current_file: current_file.unwrap_or_default(),
+                    percent: p.percent,
+                    current_file: p.current_file.unwrap_or_default(),
+                    done: p.done,
+                    total: p.total,
                 },
             );
         };
@@ -725,13 +759,15 @@ pub fn start_edit(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |percent: u8, current_file: Option<String>| {
+        let mut on_progress = |p: zipmania_archive::Progress| {
             let _ = app_bg.emit(
                 "job:progress",
                 JobProgress {
                     job_id: job_for_thread.clone(),
-                    percent,
-                    current_file: current_file.unwrap_or_default(),
+                    percent: p.percent,
+                    current_file: p.current_file.unwrap_or_default(),
+                    done: p.done,
+                    total: p.total,
                 },
             );
         };
@@ -844,11 +880,13 @@ pub fn extract(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |percent: u8, current_file: Option<String>| {
+        let mut on_progress = |p: zipmania_archive::Progress| {
             let payload = JobProgress {
                 job_id: job_for_thread.clone(),
-                percent,
-                current_file: current_file.unwrap_or_default(),
+                percent: p.percent,
+                current_file: p.current_file.unwrap_or_default(),
+                done: p.done,
+                total: p.total,
             };
             let _ = app_bg.emit("job:progress", payload);
         };
@@ -923,11 +961,13 @@ pub fn create_archive(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |percent: u8, current_file: Option<String>| {
+        let mut on_progress = |p: zipmania_archive::Progress| {
             let payload = JobProgress {
                 job_id: job_for_thread.clone(),
-                percent,
-                current_file: current_file.unwrap_or_default(),
+                percent: p.percent,
+                current_file: p.current_file.unwrap_or_default(),
+                done: p.done,
+                total: p.total,
             };
             let _ = app_bg.emit("job:progress", payload);
         };
@@ -947,13 +987,14 @@ pub fn create_archive(
 /// 해제 결과 → job:done/job:error 발행
 fn emit_extract_result(app: &tauri::AppHandle, job_id: &str, result: ExtractResult) {
     match result {
-        ExtractResult::Done { status, message } => {
+        ExtractResult::Done { status, missing, missing_total } => {
             let _ = app.emit(
                 "job:done",
                 JobDone {
                     job_id: job_id.to_string(),
                     status: status.to_string(),
-                    message,
+                    missing,
+                    missing_total,
                 },
             );
         }
@@ -973,13 +1014,14 @@ fn emit_extract_result(app: &tauri::AppHandle, job_id: &str, result: ExtractResu
 /// 압축 결과 → job:done/job:error 발행
 fn emit_create_result(app: &tauri::AppHandle, job_id: &str, result: CreateResult) {
     match result {
-        CreateResult::Done { status, message } => {
+        CreateResult::Done { status, missing, missing_total } => {
             let _ = app.emit(
                 "job:done",
                 JobDone {
                     job_id: job_id.to_string(),
                     status: status.to_string(),
-                    message,
+                    missing,
+                    missing_total,
                 },
             );
         }
@@ -1871,47 +1913,58 @@ pub fn open_folder(path: String) -> Result<(), String> {
 /// 항목을 세션 임시 루트 하위 결정적 경로에 풀고 실행, 재클릭 시 재사용
 /// Ara_<랜덤>/<짧은해시>/<압축 파일명>/<내부경로>
 /// 푼 것이 아카이브면 실행 대신 그 경로를 Some 으로 반환(판정 = is_archive_path)
+/// password = 암호 재질의용(첫 호출 None), 실패 = ZipManiaError, 프런트가 code 로 분기
 #[tauri::command]
 pub async fn open_entry(
     app: tauri::AppHandle,
     archive: String,
     inner_path: String,
-) -> Result<Option<String>, String> {
-    let dll = sevenzip_dll_path(&app).map_err(|e| e.to_string())?;
-    // 세션 암호 재사용
-    let password = session_pw_get(&app, &archive);
+    password: Option<String>,
+) -> Result<Option<String>, ZipManiaError> {
+    let dll = sevenzip_dll_path(&app)?;
+    // 암호 미지정 → 세션 암호 폴백
+    let password = password.or_else(|| session_pw_get(&app, &archive));
 
     // 결정적 경로 + 임시 루트 하위 확인(조상 링크 차단)
     let base = archive_temp_dir(&app, &archive);
     let Some(dest_file) = inner_dest_path(&base, &inner_path) else {
-        return Err("잘못된 파일 경로입니다.".into());
+        return Err(ZipManiaError::new(
+            "unsafe_path",
+            format!("허용되지 않는 경로: {inner_path}"),
+        ));
     };
 
     // 이미 풀림 → 재추출 없이 실행
     if !dest_file.is_file() {
         if let Some(parent) = dest_file.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("임시 폴더를 만들지 못했습니다: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ZipManiaError::new("io_error", format!("임시 폴더를 만들지 못했습니다: {e}"))
+            })?;
         }
         // 블로킹 추출 = async 런타임 blocking 풀
         let archive_bg = archive.clone();
         let inner_bg = inner_path.clone();
         let dest_bg = dest_file.clone();
+        let pw_bg = password.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
             let router = Router::new(dll);
             router.for_archive(&archive_bg).extract_entry_to_file(
                 &archive_bg,
                 &inner_bg,
                 &dest_bg,
-                password.as_deref(),
+                pw_bg.as_deref(),
             )
         })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| ZipManiaError::new("io_error", e.to_string()))?;
 
         if let Err(err) = result {
             // 대상을 지우지 않는다 — 백엔드가 StagedFile 로 쓰므로 그 자리의 파일은 정상 캐시다
-            return Err(err.message);
+            return Err(err);
+        }
+        // 성공 시 세션 보관 → 다음 항목은 재질의 없음
+        if let Some(pw) = &password {
+            session_pw_set(&app, &archive, pw);
         }
     }
 
@@ -1924,7 +1977,7 @@ pub async fn open_entry(
     }
 
     // 그 외 = 기본 연결 프로그램 실행
-    run_default(&dest_file)?;
+    run_default(&dest_file).map_err(|m| ZipManiaError::new("io_error", m))?;
     Ok(None)
 }
 
@@ -2059,30 +2112,54 @@ pub async fn begin_shell_drag(
     archive: String,
     inner_paths: Vec<String>,
     password: Option<String>,
-) -> Result<(), String> {
-    let dll = sevenzip_dll_path(&app).map_err(|e| e.to_string())?;
+) -> Result<(), ZipManiaError> {
+    let dll = sevenzip_dll_path(&app)?;
     // 암호 없으면 세션 값 재사용
     let password = password.or_else(|| session_pw_get(&app, &archive));
 
     // 선택 → 실제 파일 항목(폴더는 하위로 펼침)
     let entries = Router::new(dll.clone())
         .for_archive(&archive)
-        .list(&archive, password.as_deref())
-        .map_err(|e| e.message)?;
+        .list(&archive, password.as_deref())?;
     let items = crate::shelldrag::resolve_items(&entries, &inner_paths);
     if items.is_empty() {
-        return Err("드래그할 파일이 없습니다.".into());
+        return Err(ZipManiaError::new("not_found", "드래그할 파일이 없습니다."));
     }
 
     let archive_for_drag = archive.clone();
     let app_for_drag = app.clone();
+    // DoDragDrop 은 주 스레드에서만, 드래그가 끝날 때까지 돌아오지 않는다
+    let (tx, rx) = std::sync::mpsc::channel();
     app.run_on_main_thread(move || {
         // CF_HDROP 요청 시 임시 루트 하위로 추출 → 경로 전달
-        let hr =
+        let out =
             crate::shelldrag::do_shell_drag(app_for_drag, archive_for_drag, dll, password, items);
-        eprintln!("[shelldrag] DoDragDrop hr = 0x{:08X}", hr.0);
+        let _ = tx.send(out);
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| ZipManiaError::new("io_error", e.to_string()))?;
+
+    // 결과를 삼키지 않는다 — 조용히 끝나면 사용자는 드래그가 안 먹는 줄 안다
+    let out = tauri::async_runtime::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|e| ZipManiaError::new("io_error", e.to_string()))?
+        .map_err(|e| ZipManiaError::new("io_error", e.to_string()))?;
+
+    if let Some(e) = out.error {
+        return Err(e);
+    }
+    if out.hr < 0 {
+        return Err(ZipManiaError::new(
+            "drag_failed",
+            format!("DoDragDrop 실패 (0x{:08X})", out.hr as u32),
+        ));
+    }
+    // 복사가 일어났는데 목록을 가져가지 않았다 = 받는 쪽이 CF_HDROP 를 읽지 않음
+    if out.effect != 0 && !out.asked {
+        return Err(ZipManiaError::new(
+            "drag_failed",
+            "드롭 대상이 파일 목록을 가져가지 않았습니다.",
+        ));
+    }
     Ok(())
 }
 
@@ -2094,8 +2171,11 @@ pub async fn begin_shell_drag(
     _archive: String,
     _inner_paths: Vec<String>,
     _password: Option<String>,
-) -> Result<(), String> {
-    Err("지원하지 않는 플랫폼입니다.".into())
+) -> Result<(), ZipManiaError> {
+    Err(ZipManiaError::new(
+        "unsupported",
+        "지원하지 않는 플랫폼입니다.",
+    ))
 }
 
 /// 탐색기에서 파일 선택 상태로 열기, [원본 파일] 용
@@ -2264,7 +2344,11 @@ mod inner_rel_path_tests {
         );
         // 링크 없는 평범한 경로는 그대로 통과
         let good = inner_dest_path(&base, "sub/ok.txt").expect("정상 경로를 거부했다");
-        let root_abs = base.canonicalize().unwrap_or_else(|_| base.clone());
+        // 내주는 경로와 같은 형태로 맞춘다(inner_dest_path 는 verbatim 접두사를 뗀다)
+        let root_abs = base
+            .canonicalize()
+            .map(super::strip_verbatim)
+            .unwrap_or_else(|_| base.clone());
         assert!(good.starts_with(&root_abs), "정상 경로가 루트 밖이다: {good:?}");
 
         assert_eq!(
@@ -2306,6 +2390,31 @@ mod inner_rel_path_tests {
             "원본"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 실재하는 루트는 canonicalize 로 \\?\ 접두사가 붙는다, 셸에 넘기기 전에 뗀다
+    #[cfg(windows)]
+    #[test]
+    fn 셸에_넘길_경로에_verbatim_접두사가_없다() {
+        use super::inner_dest_path;
+        let base = std::env::temp_dir().join(format!("zm_verb_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("sub")).unwrap();
+
+        let got = inner_dest_path(&base, "sub/문서.txt").expect("정상 경로를 거부했다");
+        let s = got.to_string_lossy();
+        assert!(
+            !s.starts_with(r"\\?\"),
+            "탐색기가 파싱하지 못하는 경로를 내줬다: {s}"
+        );
+        assert!(s.ends_with(r"sub\문서.txt"), "경로가 어긋났다: {s}");
+        // 접두사를 뗐어도 같은 파일을 가리켜야 한다
+        std::fs::write(&got, "내용").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(base.join("sub").join("문서.txt")).unwrap(),
+            "내용"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 

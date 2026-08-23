@@ -1,6 +1,7 @@
 <script>
   // 파일 테이블 — 정렬 헤더, 폴더 더블클릭 진입, 외부 라이브러리 없는 가상 스크롤
   import { onDestroy } from "svelte";
+  import { get } from "svelte/store";
   import {
     visibleRows,
     selectedPaths,
@@ -20,10 +21,11 @@
     removeSelectedFromArchive,
     selectAllVisible,
     canEditArchive,
+    jobResult,
   } from "../lib/stores.js";
   import { formatSize, formatModified } from "../lib/format.js";
   import { beginShellDrag, showContextMenu } from "../lib/api.js";
-  import { t } from "../lib/i18n.js";
+  import { t, errText } from "../lib/i18n.js";
   import FileIcon from "./FileIcon.svelte";
 
   const ROW_H = 28; // 한 행의 고정 높이(px), 가상 스크롤 계산 기준
@@ -63,7 +65,8 @@
   let viewportH = 0;
   let bodyEl; // 스크롤 뷰포트 — 키보드 포커스, 스크롤 조정 대상
   let headEl; // 헤더 클리핑 래퍼 — 본문의 scrollLeft 를 따라간다
-  let anchorIndex = -1; // Shift+클릭 범위 선택의 기준(마지막 단일/Ctrl 클릭) 인덱스
+  let anchorIndex = -1; // Shift+클릭/Shift+방향키 범위 선택의 기준 인덱스
+  let cursorIndex = -1; // 키보드 커서(마지막으로 옮긴 행), 범위 확장의 끝점, 화면 표시 없음
   let pendingSinglePath = null; // 이미 선택된 다중 행을 눌렀을 때, 드래그 없이 떼면 단일선택할 경로
 
   // ── 마퀴(고무줄) 선택 — 빈 영역을 드래그해 사각형 안의 항목을 선택 ──
@@ -80,6 +83,12 @@
 
   // 현재 활성(키보드 커서) 행 인덱스 — 선택된 것 중 첫 번째, 없으면 -1
   $: activeIndex = rows.findIndex((r) => $selectedPaths.has(r.path));
+  // 선택이 비면(폴더 이동 등) 커서도 무효, 안 그러면 옛 위치에서 이동이 시작된다
+  $: if ($selectedPaths.size === 0) cursorIndex = -1;
+  // 목록이 짧아지면 커서를 끝으로 당긴다
+  $: if (cursorIndex >= total) cursorIndex = total - 1;
+  // 한 화면 행 수(PageUp/PageDown 이동 폭), 최소 1
+  $: pageSize = Math.max(1, Math.floor(viewportH / ROW_H));
 
   function onScroll(e) {
     scrollTop = e.target.scrollTop;
@@ -97,17 +106,21 @@
       const lo = Math.min(a, idx);
       const hi = Math.max(a, idx);
       setSelectionPaths(rows.slice(lo, hi + 1).map((r) => r.path));
-      // 기준 유지(연속 Shift+클릭으로 범위 증감 가능)
+      // 기준 유지(연속 Shift+클릭으로 범위 증감 가능), 커서만 끝점으로
+      cursorIndex = idx;
     } else if (e.ctrlKey || e.metaKey) {
       selectRow(row.path, true);
       anchorIndex = idx;
+      cursorIndex = idx;
     } else if ($selectedPaths.has(row.path) && $selectedPaths.size > 1) {
       // 이미 다중 선택된 행 그냥 누름 → 선택 유지(드래그 대비), 드래그 없이 떼면 이 행 하나로 축소
       pendingSinglePath = row.path;
       anchorIndex = idx;
+      cursorIndex = idx;
     } else {
       selectRow(row.path, false);
       anchorIndex = idx;
+      cursorIndex = idx;
     }
     bodyEl?.focus(); // 이후 화살표 키가 목록에서 동작하도록 포커스를 뷰포트에 둔다
   }
@@ -231,9 +244,13 @@
     let targets = rows.filter((r) => $selectedPaths.has(r.path));
     if (!targets.some((r) => r.path === row.path)) targets = [row];
     const innerPaths = targets.map((r) => r.path);
-    beginShellDrag($archivePath, innerPaths).catch((err) =>
-      console.error("shell drag 실패:", err),
-    );
+    // 실패를 삼키지 않는다 — 아무 일도 없으면 사용자는 드래그가 안 먹는 줄 안다
+    beginShellDrag($archivePath, innerPaths).catch((err) => {
+      jobResult.set({
+        status: "error",
+        message: errText(get(t), err && err.code, get(t)("errors.drag_failed")),
+      });
+    });
   }
 
   // 가상 스크롤이라 대상 행이 화면 밖일 수 있음 → 컨테이너 스크롤 조정
@@ -249,29 +266,52 @@
   }
 
   // 인덱스 이동 = 그 행 하나만 선택 + 화면에 보이도록 스크롤
-  function moveTo(idx) {
+  /**
+   * 커서 이동, extend 면 기준(anchor)부터 범위 선택, 아니면 그 행 하나만
+   * @param {number} idx 옮겨 갈 행
+   * @param {boolean} extend Shift 여부
+   */
+  function moveTo(idx, extend) {
     if (idx < 0 || idx >= total) return;
-    setSelection(rows[idx].path);
-    anchorIndex = idx; // 이후 Shift+클릭 범위 기준을 현재 위치로
+    if (extend) {
+      const a = anchorIndex >= 0 && anchorIndex < total ? anchorIndex : idx;
+      const lo = Math.min(a, idx);
+      const hi = Math.max(a, idx);
+      setSelectionPaths(rows.slice(lo, hi + 1).map((r) => r.path));
+      anchorIndex = a; // 기준 유지 → 방향을 되돌리면 범위가 줄어든다
+    } else {
+      setSelection(rows[idx].path);
+      anchorIndex = idx; // 이후 Shift 범위 기준을 현재 위치로
+    }
+    cursorIndex = idx;
     ensureVisible(idx);
   }
 
-  // 목록 전체(뷰포트)에서의 키보드 조작: ↑/↓ 이동, Home/End, Enter(폴더 진입)
+  // 목록 전체(뷰포트)에서의 키보드 조작: ↑/↓/PageUp/PageDown/Home/End 이동(Shift = 범위 확장),
+  // Ctrl+A 전체 선택, Enter(폴더 진입/실행)
   function onListKeydown(e) {
     if (total === 0) return;
-    const idx = activeIndex;
+    // 커서가 없으면(클릭 없이 목록에 들어옴) 선택된 첫 행부터
+    const idx = cursorIndex >= 0 && cursorIndex < total ? cursorIndex : activeIndex;
+    const ext = e.shiftKey;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      moveTo(idx < 0 ? 0 : Math.min(total - 1, idx + 1));
+      moveTo(idx < 0 ? 0 : Math.min(total - 1, idx + 1), ext);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      moveTo(idx < 0 ? 0 : Math.max(0, idx - 1));
+      moveTo(idx < 0 ? 0 : Math.max(0, idx - 1), ext);
+    } else if (e.key === "PageDown") {
+      e.preventDefault();
+      moveTo(idx < 0 ? 0 : Math.min(total - 1, idx + pageSize), ext);
+    } else if (e.key === "PageUp") {
+      e.preventDefault();
+      moveTo(idx < 0 ? 0 : Math.max(0, idx - pageSize), ext);
     } else if (e.key === "Home") {
       e.preventDefault();
-      moveTo(0);
+      moveTo(0, ext);
     } else if (e.key === "End") {
       e.preventDefault();
-      moveTo(total - 1);
+      moveTo(total - 1, ext);
     } else if (e.key === "Enter") {
       e.preventDefault();
       const row = rows[idx];
@@ -331,6 +371,7 @@
   <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
   <div
     class="body"
+    data-ui="file-list"
     on:scroll={onScroll}
     on:mousedown={onBodyMouseDown}
     on:contextmenu={onBodyContextMenu}

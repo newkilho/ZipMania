@@ -14,6 +14,7 @@ import {
 import { applyTheme } from "./lib/theme.js";
 import { applySkin } from "./lib/skin.js";
 import { applyLanguage } from "./lib/i18n.js";
+import { isEditing } from "./lib/dom.js";
 
 const label = currentWindowLabel();
 const Root =
@@ -24,6 +25,13 @@ const Root =
       : label === "settings"
         ? SettingsWindow
         : App;
+
+// 웹뷰 기본 우클릭 메뉴 차단, 창 종류 무관 한 곳
+// 우리 메뉴가 있는 자리는 그쪽 핸들러가 먼저 preventDefault + showContextMenu
+document.addEventListener("contextmenu", (e) => {
+  if (isEditing(e.target)) return;
+  e.preventDefault();
+});
 
 async function boot() {
   applySkin("default");

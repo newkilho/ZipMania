@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::backend::{ArchiveBackend, CreateOptions, CreateResult, ExtractOptions, ExtractResult};
+use crate::backend::{ArchiveBackend, CreateOptions, CreateResult, ExtractOptions, ExtractResult, Progress};
 #[cfg(windows)]
 use crate::backend::EditOptions;
 use crate::formats::{CompressFormat, OverwriteMode};
@@ -182,7 +182,7 @@ mod cross {
             .test_report(
                 arc.to_str().unwrap(),
                 Some("pw1234"),
-                &mut |_, _| {},
+                &mut |_| {},
                 no_cancel(),
             )
             .expect("무결성 검사가 실패했다");
@@ -205,13 +205,13 @@ mod cross {
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
 
-        let r = Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        let r = Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
         assert_eq!(status_of(&r), "ok");
 
         let a = td.s("ex_mine");
         let b = td.s("ex_7z");
-        let r1 = Unzip::new().extract(&extract_opts(&out, &a, None), &mut |_, _| {}, no_cancel());
-        let r2 = sz().extract(&extract_opts(&out, &b, None), &mut |_, _| {}, no_cancel());
+        let r1 = Unzip::new().extract(&extract_opts(&out, &a, None), &mut |_| {}, no_cancel());
+        let r2 = sz().extract(&extract_opts(&out, &b, None), &mut |_| {}, no_cancel());
         assert_eq!(ex_status(&r1), "ok");
         assert_eq!(ex_status(&r2), "ok", "7z.dll 이 우리 zip 을 풀지 못했다");
         assert_eq!(snapshot(Path::new(&a)), snapshot(Path::new(&b)));
@@ -224,13 +224,13 @@ mod cross {
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
 
-        let r = sz().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        let r = sz().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
         assert_eq!(status_of(&r), "ok");
 
         let a = td.s("ex_mine");
         let b = td.s("ex_7z");
-        let r1 = Unzip::new().extract(&extract_opts(&out, &a, None), &mut |_, _| {}, no_cancel());
-        let r2 = sz().extract(&extract_opts(&out, &b, None), &mut |_, _| {}, no_cancel());
+        let r1 = Unzip::new().extract(&extract_opts(&out, &a, None), &mut |_| {}, no_cancel());
+        let r2 = sz().extract(&extract_opts(&out, &b, None), &mut |_| {}, no_cancel());
         assert_eq!(ex_status(&r1), "ok");
         assert_eq!(ex_status(&r2), "ok");
         assert_eq!(snapshot(Path::new(&a)), snapshot(Path::new(&b)));
@@ -242,7 +242,7 @@ mod cross {
         let td = TempDir::new("list_eq");
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
-        sz().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        sz().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
         let norm = |mut v: Vec<crate::models::ArchiveEntry>| {
             for e in &mut v {
@@ -267,17 +267,17 @@ mod cross {
         let theirs = td.s("theirs.zip");
         const PW: &str = "Secret1234";
 
-        Unzip::new().create(&create_opts(&mine, &inputs, 5, Some(PW)), &mut |_, _| {}, no_cancel());
-        sz().create(&create_opts(&theirs, &inputs, 5, Some(PW)), &mut |_, _| {}, no_cancel());
+        Unzip::new().create(&create_opts(&mine, &inputs, 5, Some(PW)), &mut |_| {}, no_cancel());
+        sz().create(&create_opts(&theirs, &inputs, 5, Some(PW)), &mut |_| {}, no_cancel());
 
         // 우리 산출물 → 7z 로 해제
         let d1 = td.s("d1");
-        let r = sz().extract(&extract_opts(&mine, &d1, Some(PW)), &mut |_, _| {}, no_cancel());
+        let r = sz().extract(&extract_opts(&mine, &d1, Some(PW)), &mut |_| {}, no_cancel());
         assert_eq!(ex_status(&r), "ok", "7z.dll 이 우리 암호 zip 을 풀지 못했다");
 
         // 7z 산출물 → 우리가 해제
         let d2 = td.s("d2");
-        let r = Unzip::new().extract(&extract_opts(&theirs, &d2, Some(PW)), &mut |_, _| {}, no_cancel());
+        let r = Unzip::new().extract(&extract_opts(&theirs, &d2, Some(PW)), &mut |_| {}, no_cancel());
         assert_eq!(ex_status(&r), "ok");
         assert_eq!(snapshot(Path::new(&d1)), snapshot(Path::new(&d2)));
     }
@@ -291,17 +291,17 @@ mod cross {
         const PW: &str = "비밀1234";
 
         let theirs = td.s("theirs.zip");
-        let r = sz().create(&create_opts(&theirs, &inputs, 5, Some(PW)), &mut |_, _| {}, no_cancel());
+        let r = sz().create(&create_opts(&theirs, &inputs, 5, Some(PW)), &mut |_| {}, no_cancel());
         assert!(
             matches!(r, CreateResult::Failed(_)),
             "7z.dll 이 한글 암호 zip 을 만들었다 — 인코딩을 맞춰야 한다"
         );
 
         let mine = td.s("mine.zip");
-        let r = Unzip::new().create(&create_opts(&mine, &inputs, 5, Some(PW)), &mut |_, _| {}, no_cancel());
+        let r = Unzip::new().create(&create_opts(&mine, &inputs, 5, Some(PW)), &mut |_| {}, no_cancel());
         assert_eq!(status_of(&r), "ok");
         let d = td.s("d");
-        let r = Unzip::new().extract(&extract_opts(&mine, &d, Some(PW)), &mut |_, _| {}, no_cancel());
+        let r = Unzip::new().extract(&extract_opts(&mine, &d, Some(PW)), &mut |_| {}, no_cancel());
         assert_eq!(ex_status(&r), "ok");
     }
 
@@ -311,14 +311,14 @@ mod cross {
         let td = TempDir::new("pw_err");
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
-        Unzip::new().create(&create_opts(&out, &inputs, 5, Some("맞는암호")), &mut |_, _| {}, no_cancel());
+        Unzip::new().create(&create_opts(&out, &inputs, 5, Some("맞는암호")), &mut |_| {}, no_cancel());
 
-        let r = Unzip::new().extract(&extract_opts(&out, &td.s("d1"), None), &mut |_, _| {}, no_cancel());
+        let r = Unzip::new().extract(&extract_opts(&out, &td.s("d1"), None), &mut |_| {}, no_cancel());
         assert_eq!(ex_status(&r), "failed:password_required");
 
         let r = Unzip::new().extract(
             &extract_opts(&out, &td.s("d2"), Some("틀린암호")),
-            &mut |_, _| {},
+            &mut |_| {},
             no_cancel(),
         );
         assert_eq!(ex_status(&r), "failed:wrong_password");
@@ -330,7 +330,7 @@ mod cross {
         let td = TempDir::new("edit");
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
-        Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
         write(&td.join("added/새파일.txt"), "추가됨".as_bytes());
         let r = Unzip::new().edit(
@@ -340,7 +340,7 @@ mod cross {
                 remove: vec!["src/ascii.log".into()],
                 password: None,
             },
-            &mut |_, _| {},
+            &mut |_| {},
             no_cancel(),
         );
         assert_eq!(status_of(&r), "ok");
@@ -363,7 +363,7 @@ mod cross {
         let td = TempDir::new("par_7z");
         let inputs = make_many(&td, 60);
         let out = td.s("out.zip");
-        let r = Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        let r = Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
         assert_eq!(status_of(&r), "ok");
 
         // 7z 의 목록/무결성 둘 다 통과 확인
@@ -374,8 +374,8 @@ mod cross {
         // 양쪽으로 풀어 바이트까지 대조
         let a = td.s("ex_mine");
         let b = td.s("ex_7z");
-        Unzip::new().extract(&extract_opts(&out, &a, None), &mut |_, _| {}, no_cancel());
-        sz().extract(&extract_opts(&out, &b, None), &mut |_, _| {}, no_cancel());
+        Unzip::new().extract(&extract_opts(&out, &a, None), &mut |_| {}, no_cancel());
+        sz().extract(&extract_opts(&out, &b, None), &mut |_| {}, no_cancel());
         assert_eq!(snapshot(Path::new(&a)), snapshot(Path::new(&b)));
     }
 
@@ -386,15 +386,15 @@ mod cross {
         let inputs = make_many(&td, 40);
 
         let par = td.s("par.zip");
-        Unzip::new().create(&create_opts(&par, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        Unzip::new().create(&create_opts(&par, &inputs, 5, None), &mut |_| {}, no_cancel());
         // 암호를 걸면 병렬 경로를 쓰지 않는다(raw_copy 가 암호를 옮기지 못하므로)
         let seq = td.s("seq.zip");
-        Unzip::new().create(&create_opts(&seq, &inputs, 5, Some("pw")), &mut |_, _| {}, no_cancel());
+        Unzip::new().create(&create_opts(&seq, &inputs, 5, Some("pw")), &mut |_| {}, no_cancel());
 
         let a = td.s("a");
         let b = td.s("b");
-        Unzip::new().extract(&extract_opts(&par, &a, None), &mut |_, _| {}, no_cancel());
-        Unzip::new().extract(&extract_opts(&seq, &b, Some("pw")), &mut |_, _| {}, no_cancel());
+        Unzip::new().extract(&extract_opts(&par, &a, None), &mut |_| {}, no_cancel());
+        Unzip::new().extract(&extract_opts(&seq, &b, Some("pw")), &mut |_| {}, no_cancel());
         assert_eq!(snapshot(Path::new(&a)), snapshot(Path::new(&b)));
 
         // 항목 순서 동일(입력 순서 = 아카이브 순서)
@@ -409,7 +409,7 @@ mod cross {
         let td = TempDir::new("fallback");
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
-        sz().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        sz().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
         // 꼬리(중앙 디렉터리 + EOCD) 절단
         let mut bytes = fs::read(&out).unwrap();
@@ -450,7 +450,7 @@ mod cross {
         let td = TempDir::new("entry_fb");
         let inputs = make_tree(&td);
         let out = td.s("out.zip");
-        sz().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        sz().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
         let mut bytes = fs::read(&out).unwrap();
         let cut = bytes.len() * 3 / 4;
@@ -480,7 +480,7 @@ mod cross {
         );
         let b = router.for_format("zip");
         assert_eq!(b.id(), "unzip");
-        let r = b.create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+        let r = b.create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
         assert_eq!(status_of(&r), "ok");
         assert!(sz().list(&out, None).is_ok());
     }
@@ -532,7 +532,7 @@ fn 경로_탈출_항목은_건너뛰고_경고한다() {
     let dest = td.join("out");
     let r = Unzip::new().extract(
         &extract_opts(&path.to_string_lossy(), &dest.to_string_lossy(), None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(ex_status(&r), "warning", "탈출 항목을 조용히 넘겼다");
@@ -550,7 +550,7 @@ fn 절대경로_항목은_루트_아래로_들어온다() {
     let dest = td.join("out");
     let r = Unzip::new().extract(
         &extract_opts(&path.to_string_lossy(), &dest.to_string_lossy(), None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(ex_status(&r), "ok");
@@ -567,7 +567,7 @@ fn 압축_실패해도_기존_파일이_남는다() {
     // 존재하지 않는 입력만 → no_input 실패
     let r = Unzip::new().create(
         &create_opts(&out.to_string_lossy(), &[td.s("없는파일.txt")], 5, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(status_of(&r), "failed:no_input");
@@ -585,7 +585,7 @@ fn 압축_취소해도_기존_파일이_남는다() {
     let cancel = Arc::new(AtomicBool::new(true)); // 시작부터 취소 상태
     let r = Unzip::new().create(
         &create_opts(&out.to_string_lossy(), &inputs, 5, None),
-        &mut |_, _| {},
+        &mut |_| {},
         cancel,
     );
     assert_eq!(status_of(&r), "canceled");
@@ -612,7 +612,7 @@ fn 병렬_압축을_취소해도_멈추지_않는다() {
     let cancel = Arc::new(AtomicBool::new(true));
     let r = Unzip::new().create(
         &create_opts(&out.to_string_lossy(), &inputs, 5, None),
-        &mut |_, _| {},
+        &mut |_| {},
         cancel,
     );
     assert_eq!(status_of(&r), "canceled");
@@ -637,7 +637,7 @@ fn 목록과_크기가_다르면_경고한다() {
     let arc = td.s("a.zip");
     let r = Unzip::new().create(
         &create_opts(&arc, &[td.s("src")], 0, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(status_of(&r), "ok");
@@ -661,7 +661,7 @@ fn 목록과_크기가_다르면_경고한다() {
     let dest = td.join("out");
     let r = Unzip::new().extract(
         &extract_opts(&arc, &dest.to_string_lossy(), None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(
@@ -688,7 +688,7 @@ fn 모순된_항목이_기존_파일을_덮지_않는다() {
     let arc = td.s("a.zip");
     Unzip::new().create(
         &create_opts(&arc, &[td.s("src")], 0, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
 
@@ -711,7 +711,7 @@ fn 모순된_항목이_기존_파일을_덮지_않는다() {
 
     let r = Unzip::new().extract(
         &extract_opts(&arc, &dest.to_string_lossy(), None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(ex_status(&r), "warning");
@@ -733,7 +733,7 @@ fn 없는_입력은_누락으로_보고한다() {
     let inputs = vec![td.s("있는파일.txt"), td.s("없는파일.txt")];
     let r = Unzip::new().create(
         &create_opts(&out, &inputs, 5, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(
@@ -741,10 +741,10 @@ fn 없는_입력은_누락으로_보고한다() {
         "warning",
         "없는 입력을 빼놓고 성공으로 마감했다"
     );
-    if let CreateResult::Done { message, .. } = &r {
+    if let CreateResult::Done { missing, .. } = &r {
         assert!(
-            message.contains("없는파일.txt"),
-            "어느 것이 빠졌는지 알려 주지 않는다: {message}"
+            missing.iter().any(|m| m.path.contains("없는파일.txt")),
+            "어느 것이 빠졌는지 알려 주지 않는다: {missing:?}"
         );
     }
 }
@@ -792,7 +792,7 @@ fn 해제_실패해도_기존_파일이_남는다() {
     let arc = td.s("a.zip");
     let r = Unzip::new().create(
         &create_opts(&arc, &[td.s("src")], 0, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(status_of(&r), "ok");
@@ -805,7 +805,7 @@ fn 해제_실패해도_기존_파일이_남는다() {
 
     let r = Unzip::new().extract(
         &extract_opts(&arc, &dest.to_string_lossy(), None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(ex_status(&r), "warning", "CRC 오류는 빠진 항목으로 보고한다");
@@ -827,7 +827,7 @@ fn 해제_취소해도_기존_파일이_남는다() {
     let arc = td.s("a.zip");
     let r = Unzip::new().create(
         &create_opts(&arc, &[td.s("src")], 0, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(status_of(&r), "ok");
@@ -840,7 +840,7 @@ fn 해제_취소해도_기존_파일이_남는다() {
     // 첫 진행률 보고에서 취소 → 대상 파일을 연 뒤 중단되는 상황 재현
     let cancel = no_cancel();
     let flip = cancel.clone();
-    let mut prog = move |_p: u8, _f: Option<String>| {
+    let mut prog = move |_p: Progress| {
         flip.store(true, std::sync::atomic::Ordering::SeqCst);
     };
     let r = Unzip::new().extract(
@@ -863,8 +863,8 @@ fn 레벨이_산출물_크기에_반영된다() {
 
     let store = td.s("store.zip");
     let best = td.s("best.zip");
-    Unzip::new().create(&create_opts(&store, &inputs, 0, None), &mut |_, _| {}, no_cancel());
-    Unzip::new().create(&create_opts(&best, &inputs, 9, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&store, &inputs, 0, None), &mut |_| {}, no_cancel());
+    Unzip::new().create(&create_opts(&best, &inputs, 9, None), &mut |_| {}, no_cancel());
 
     let s = fs::metadata(&store).unwrap().len();
     let b = fs::metadata(&best).unwrap().len();
@@ -879,7 +879,7 @@ fn 원본_수정시각을_보존한다() {
     let src = td.join("src/old.txt");
     write(&src, b"old");
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &[td.s("src")], 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &[td.s("src")], 5, None), &mut |_| {}, no_cancel());
 
     let listed = Unzip::new().list(&out, None).unwrap();
     let file = listed.iter().find(|e| !e.is_dir).unwrap();
@@ -943,7 +943,7 @@ fn 뷰어_경로가_바이트를_그대로_준다() {
     let td = TempDir::new("mem");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
     let got = Unzip::new()
         .read_entry_to_memory(&out, "src/문서.txt", None)
@@ -963,7 +963,7 @@ fn 드래그_경로가_파일과_writer_로_추출한다() {
     let td = TempDir::new("drag");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
     let want = (0u8..=255).collect::<Vec<u8>>();
 
     let dest = td.join("dragged.bin");
@@ -997,7 +997,7 @@ fn 바이러스_검사가_항목별로_돈다() {
     let td = TempDir::new("scan");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
     let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let s2 = seen.clone();
@@ -1011,7 +1011,7 @@ fn 바이러스_검사가_항목별로_돈다() {
                 s2.lock().unwrap().push(path.to_string());
                 if bytes.starts_with(b"EICAR") { "malware".into() } else { "clean".into() }
             }),
-            &mut |_, _| {},
+            &mut |_| {},
             no_cancel(),
         )
         .expect("검사 실패");
@@ -1033,7 +1033,7 @@ fn 충돌_검사가_기존_파일만_찾는다() {
     let td = TempDir::new("conflict");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
     let dest = td.join("d");
     write(&dest.join("src/문서.txt"), "기존".as_bytes());
@@ -1052,7 +1052,7 @@ fn 무결성_검사가_손상을_잡는다() {
     fs::write(&path, raw_zip(b"a.txt", b"hello", 0, 0xDEAD_BEEF, 0)).unwrap();
 
     let report = Unzip::new()
-        .test_report(&path.to_string_lossy(), None, &mut |_, _| {}, no_cancel())
+        .test_report(&path.to_string_lossy(), None, &mut |_| {}, no_cancel())
         .unwrap();
     assert_eq!(report.len(), 1);
     assert!(!report[0].ok, "손상을 정상으로 봤다");
@@ -1066,10 +1066,10 @@ fn 무결성_검사가_정상을_통과시킨다() {
     let td = TempDir::new("test_ok");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
     let report = Unzip::new()
-        .test_report(&out, None, &mut |_, _| {}, no_cancel())
+        .test_report(&out, None, &mut |_| {}, no_cancel())
         .unwrap();
     assert!(!report.is_empty());
     assert!(report.iter().all(|e| e.ok), "{report:?}");
@@ -1089,12 +1089,12 @@ fn 선택한_경로만_해제한다() {
     let td = TempDir::new("selected");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
     let dest = td.join("sel");
     let mut opts = extract_opts(&out, &dest.to_string_lossy(), None);
     opts.selected = vec!["src/sub".into()];
-    let r = Unzip::new().extract(&opts, &mut |_, _| {}, no_cancel());
+    let r = Unzip::new().extract(&opts, &mut |_| {}, no_cancel());
     assert_eq!(ex_status(&r), "ok");
     assert!(dest.join("src/sub/data.bin").exists());
     assert!(!dest.join("src/문서.txt").exists());
@@ -1106,13 +1106,13 @@ fn 건너뛰기가_기존_파일을_보존한다() {
     let td = TempDir::new("skip");
     let inputs = make_tree(&td);
     let out = td.s("out.zip");
-    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_, _| {}, no_cancel());
+    Unzip::new().create(&create_opts(&out, &inputs, 5, None), &mut |_| {}, no_cancel());
 
     let dest = td.join("d");
     write(&dest.join("src/문서.txt"), b"KEEP");
     let mut opts = extract_opts(&out, &dest.to_string_lossy(), None);
     opts.overwrite = OverwriteMode::Skip;
-    Unzip::new().extract(&opts, &mut |_, _| {}, no_cancel());
+    Unzip::new().extract(&opts, &mut |_| {}, no_cancel());
     assert_eq!(fs::read(dest.join("src/문서.txt")).unwrap(), b"KEEP");
 }
 
@@ -1248,7 +1248,7 @@ fn 이름을_알_수_없는_입력도_누락으로_보고한다() {
     let inputs = vec![td.s("있는파일.txt"), "..".to_string()];
     let r = Unzip::new().create(
         &create_opts(&out, &inputs, 5, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(
@@ -1256,10 +1256,10 @@ fn 이름을_알_수_없는_입력도_누락으로_보고한다() {
         "warning",
         "담지 못한 입력을 빼놓고 성공으로 마감했다"
     );
-    if let CreateResult::Done { message, .. } = &r {
+    if let CreateResult::Done { missing, .. } = &r {
         assert!(
-            message.contains(".."),
-            "어느 것이 빠졌는지 알려 주지 않는다: {message}"
+            missing.iter().any(|m| m.path.contains("..")),
+            "어느 것이 빠졌는지 알려 주지 않는다: {missing:?}"
         );
     }
 }
@@ -1274,7 +1274,7 @@ fn 단일_항목_추출은_대상을_먼저_자르지_않는다() {
     let arc = td.s("a.zip");
     let r = Unzip::new().create(
         &create_opts(&arc, &[td.s("src")], 0, None),
-        &mut |_, _| {},
+        &mut |_| {},
         no_cancel(),
     );
     assert_eq!(status_of(&r), "ok");

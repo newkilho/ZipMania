@@ -1,10 +1,10 @@
 # ZipMania 셸 확장 (ZipManiaShell.dll)
 
-Windows 탐색기 우클릭 메뉴(`IExplorerCommand`)를 제공하는 C++/WinRT 인프로세스 COM DLL이다.
+Windows 탐색기 우클릭 메뉴(클래식 `IContextMenu` + `IShellExtInit`)를 제공하는 C++/WinRT 인프로세스 COM DLL이다.
 메뉴 라벨에 실제 파일명(`사진.zip으로 압축하기`, `사진에 풀기`)을 표시한다.
 
 - **얇은 프록시**: 선택 항목을 모아 `ZipMania.exe --<스위치> "<경로>"…` 로 실행할 뿐, 실제 압축/해제/열기는 앱(`src-tauri/src/cli.rs`)이 처리한다.
-- **등록**: 앱이 HKCU 에 자체 등록한다(`src-tauri/src/shell_reg.rs`). regsvr32·관리자 권한·MSIX 불필요. 환경설정 "탐색기 메뉴" 토글로 ON/OFF.
+- **등록**: 앱이 HKCU 에 자체 등록한다(`src-tauri/src/shell_reg.rs`) — `*\ShellEx\ContextMenuHandlers\ZipMania` 와 `Directory\ShellEx\…` 두 자리. regsvr32·관리자 권한·MSIX 불필요. 환경설정 "탐색기 메뉴" 토글로 ON/OFF.
 - **exe 경로**: 앱이 등록 시 `HKCU\Software\ZipMania\ShellExt\ExePath` 에 기록 → DLL 이 읽어 실행(DLL 과 exe 가 다른 폴더여도 동작).
 - **배치 범위(1단계)**: 레거시 메뉴(Win10 기본 / Win11 "더 많은 옵션 표시" 하위). Win11 기본 메뉴는 후순위(Sparse MSIX + 코드서명).
 
@@ -29,18 +29,19 @@ Visual Studio **Build Tools 2022** + **Windows SDK** 만 필요하다(NuGet·Win
 
 `ZipManiaShell.cpp` 와 `src-tauri/src/shell_reg.rs` 가 아래를 **동일**하게 유지해야 한다:
 
-- CLSID 두 개: 압축 `{B7E5C9A2-…-…C01}`, 풀기 `{…C02}`.
-- 아카이브 확장자 목록(`kArchiveExts` ↔ `ARCHIVE_EXTS`).
-- CLI 스위치(`--compress-zip`, `--compress`, `--extract-here`, `--extract-smart`, `--extract-newfolder`, `--extract`, `--open`) ↔ `cli.rs` 파서.
+- CLSID 하나: `{02BEA257-B0A9-4B99-9A99-F3F61885D771}` (`CLSID_ZipManiaMenu` ↔ `CLSID_MENU`).
+- 아카이브 확장자 목록: `kArchiveExts` 는 `zipmania-archive` 의 `READ_EXTS` 사본이고 `ext_tests` 가 대조한다.
+- CLI 스위치(`--compress-zip`, `--compress`, `--compress-each`, `--extract-here`, `--extract-newfolder`, `--extract`, `--open`, `--extract-each-newfolder`) ↔ `cli.rs` 파서.
 
 ## 메뉴 구성 (최상위 평면 — "집매니아" 서브메뉴 없음)
 
-항목마다 독립 CLSID + verb 로 등록해 우클릭 메뉴에 **바로 나열**된다(계단식 아님).
+핸들러 하나가 항목을 최상위에 **바로 나열**한다(계단식 아님).
 
-- **파일·폴더**(아카이브에선 `AppliesTo` 로 숨김): `{이름}.zip으로 압축하기`(즉시) / `집매니아로 압축하기`(창)
-- **아카이브**: `여기에 풀기` / `알아서 풀기` / `{이름}에 풀기` / `집매니아로 압축 풀기`(창) / `집매니아로 열기`
+- **파일·폴더**(단일 아카이브를 고르면 압축 항목은 숨김): `{이름}.zip으로 압축하기`(즉시) / `집매니아로 압축하기`(창)
+- **아카이브**: `여기에 풀기` / `{이름}에 풀기` / `집매니아로 압축 풀기`(창) / `집매니아로 열기`
+- **다중 선택**: 단일 전용 항목 대신 `각각 압축하기` / `각각 폴더에 풀기`
 
-> CLSID 7개(`…C01`~`…C07`)와 verb 키 이름·순서는 `ZipManiaShell.cpp` ↔ `shell_reg.rs` 가 일치해야 한다.
+> 항목마다 CLSID 를 나누지 않는다 — 핸들러 하나가 `QueryContextMenu` 에서 선택 내용을 보고 그때그때 만들고, `InvokeCommand` 는 메뉴 순서로 스위치를 고른다.
 > 등록 구조를 바꾼 뒤에는 환경설정에서 껐다 켜(재등록) 반영한다.
 
 ## 후순위 (2단계): Win11 기본 메뉴

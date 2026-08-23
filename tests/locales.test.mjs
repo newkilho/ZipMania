@@ -57,10 +57,57 @@ test("코드가 부르는 $t 키가 사전에 있다", () => {
   for (const file of sourceFiles(root)) {
     const src = readFileSync(file, "utf8");
     // $t("키") / t("키"), 앞 글자 검사로 sort( · set( 같은 이름은 걸러낸다
-    // errText 의 errors.<code> 는 런타임 조합이라 여기서 잡히지 않는다
+    // errText 의 errors.<code> = 런타임 조합, 아래 테스트 담당
     for (const m of src.matchAll(/(?<![\w$])\$?t\(\s*"([a-zA-Z][\w.]*)"/g)) {
       if (!Object.prototype.hasOwnProperty.call(dict, m[1])) missing.add(m[1]);
     }
   }
   assert.deepEqual([...missing], [], "사전에 없는 키를 부른다");
+});
+
+/** dir 아래 모든 .rs 파일 경로 */
+function rustFiles(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) rustFiles(p, out);
+    else if (name.endsWith(".rs")) out.push(p);
+  }
+  return out;
+}
+
+// 키 없음 → errText 폴백이 백엔드 message(한국어 고정) 그대로 노출
+test("백엔드 오류 코드마다 errors 키가 있다", () => {
+  const dict = strings.strings[REFERENCE];
+  const roots = ["../crates/zipmania-archive/src", "../src-tauri/src"].map((r) =>
+    fileURLToPath(new URL(r, import.meta.url)),
+  );
+  const missing = new Set();
+  for (const root of roots) {
+    for (const file of rustFiles(root)) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/ZipManiaError::new\(\s*"([a-z_]+)"/g)) {
+        const key = `errors.${m[1]}`;
+        if (!Object.prototype.hasOwnProperty.call(dict, key)) missing.add(key);
+      }
+    }
+  }
+  assert.deepEqual([...missing], [], "번역이 없어 한국어 원문이 노출되는 오류 코드가 있다");
+});
+
+// 누락 사유는 missing.<reason> 으로만 문장이 된다, 키가 없으면 화면에 키 문자열 노출
+test("누락 사유마다 missing 키가 있다", () => {
+  const dict = strings.strings[REFERENCE];
+  const src = readFileSync(
+    new URL("../crates/zipmania-archive/src/backend/mod.rs", import.meta.url),
+    "utf8",
+  );
+  const block = src.match(/pub enum MissingReason \{([^}]*)\}/);
+  assert.ok(block, "MissingReason 선언을 찾지 못했다");
+  const variants = [...block[1].matchAll(/^\s*([A-Z]\w*),/gm)].map((m) => m[1]);
+  assert.ok(variants.length >= 5, `사유를 제대로 읽지 못했다: ${variants}`);
+  // serde rename_all = camelCase, Rust 의 PascalCase 를 같은 규칙으로 변환
+  const missing = variants
+    .map((v) => "missing." + v[0].toLowerCase() + v.slice(1))
+    .filter((k) => !Object.prototype.hasOwnProperty.call(dict, k));
+  assert.deepEqual(missing, [], "번역이 없어 키 문자열이 그대로 표시되는 사유가 있다");
 });
