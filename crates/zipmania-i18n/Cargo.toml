@@ -1,6 +1,6 @@
 [package]
 name = "zipmania-i18n"
-version = "0.9.1"
+version = "0.9.2"
 description = "ZipMania - UI 텍스트 정본과 생성기"
 edition = "2021"
 rust-version = "1.88"

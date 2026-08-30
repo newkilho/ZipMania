@@ -1772,11 +1772,20 @@ pub(crate) async fn open_viewer_window(app: &tauri::AppHandle, path: String) -> 
     // 세션은 build 보다 먼저 발급 — 창이 곧바로 보내는 IPC 가 label 로 떨어지지 않게
     let session = app.state::<WindowSessions>().begin(&label);
 
+    // 메인 창과 같은 크기 규칙 — 기억한 크기를 함께 쓴다
+    let (vw, vh) = {
+        let (s, trusted) = crate::settings::load_checked(app);
+        if trusted {
+            crate::wingeom::restore_size(app, &s)
+        } else {
+            (crate::wingeom::DEF_W, crate::wingeom::DEF_H)
+        }
+    };
+
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         .title(title)
-        // 메인 창과 같은 크기
-        .inner_size(690.0, 600.0)
-        .min_inner_size(690.0, 420.0)
+        .inner_size(vw, vh)
+        .min_inner_size(crate::wingeom::MIN_W, crate::wingeom::MIN_H)
         // 위치 미지정, 가운데 정렬 시 여러 창이 정확히 겹침, 숨겨서 생성 → 다크 캡션 → 표시
         .visible(false)
         .resizable(true)

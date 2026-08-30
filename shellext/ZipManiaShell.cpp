@@ -105,12 +105,27 @@ static std::wstring Stem(const std::wstring& path)
     return (dot == std::wstring::npos || dot == 0) ? name : name.substr(0, dot);
 }
 
+// 폴더 여부, 경로가 없거나 읽지 못하면 false
+static bool IsDirectory(const std::wstring& path)
+{
+    DWORD attr = GetFileAttributesW(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+// 아카이브 여부, 폴더는 이름이 확장자처럼 보여도 아니다
 static bool IsArchive(const std::wstring& path)
 {
+    if (IsDirectory(path)) return false;
     std::wstring ext = ExtOf(path);
     for (auto* e : kArchiveExts)
         if (ext == e) return true;
     return false;
+}
+
+// 압축 결과 이름의 바탕, 폴더는 이름 그대로, 파일은 확장자 하나 제거
+static std::wstring ArchiveStem(const std::wstring& path)
+{
+    return IsDirectory(path) ? FileName(path) : Stem(path);
 }
 
 // 경로의 부모 폴더 경로
@@ -304,9 +319,10 @@ struct MenuHandler : implements<MenuHandler, IShellExtInit, IContextMenu>
                 allArchive = false;
         }
         const std::wstring stem = m_files.empty() ? L"" : Stem(m_files.front());
-        // 다중 선택 = 현재 폴더명, 단일 = 파일명(stem)
-        const std::wstring name =
-            (count > 1 && !m_files.empty()) ? ParentFolderName(m_files.front()) : stem;
+        // 다중 선택 = 현재 폴더명, 단일 = ArchiveStem(폴더는 이름 그대로)
+        const std::wstring name = m_files.empty() ? L""
+                                 : (count > 1 ? ParentFolderName(m_files.front())
+                                              : ArchiveStem(m_files.front()));
         // 압축은 단일 아카이브일 때만 숨김(아카이브 여러 개면 하나로 묶어 압축 가능)
         const bool singleArchive = (count == 1 && anyArchive);
 

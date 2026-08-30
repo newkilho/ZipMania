@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-/// 앱 설정
+/// 앱 설정, window_width/window_height 의 0 = 미지정
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -24,6 +24,9 @@ pub struct Settings {
     pub file_assoc_initialized: bool,
     pub assoc_banner_dismissed: bool,
     pub recent_files: Vec<String>,
+    pub window_width: u32,
+    pub window_height: u32,
+    pub window_maximized: bool,
 }
 
 impl Default for Settings {
@@ -40,6 +43,9 @@ impl Default for Settings {
             file_assoc_initialized: false,
             assoc_banner_dismissed: false,
             recent_files: Vec::new(),
+            window_width: 0,
+            window_height: 0,
+            window_maximized: false,
         }
     }
 }

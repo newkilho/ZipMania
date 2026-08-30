@@ -15,6 +15,7 @@ mod shell_reg;
 mod shelldrag;
 mod sysicon;
 mod update;
+mod wingeom;
 mod wintheme;
 
 use jobs::JobManager;
@@ -27,6 +28,10 @@ fn main() {
         std::process::exit(code);
     }
 
+    // 메인 창 크기 캐시, 창 이벤트가 채우고 RunEvent::Exit 이 기록
+    let geom = wingeom::cell();
+    let geom_setup = geom.clone();
+
     tauri::Builder::default()
         // 탐색기 통합: 파일당 argv 를 첫 인스턴스로 포워딩, single-instance 를 먼저 등록
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -35,7 +40,7 @@ fn main() {
         // 파일/폴더 선택 다이얼로그 플러그인 (툴바 [열기], 해제 대상 폴더 선택)
         .plugin(tauri_plugin_dialog::init())
         // 메인 창이 닫히면 압축 창도 닫는다(부모-소유로 자동 파괴되지만 중복 안전)
-        .setup(|app| {
+        .setup(move |app| {
             // 셸에서 기능 창(압축/풀기)만 띄우려는 실행이면 메인 창을 숨긴 채 둔다
             let argv: Vec<String> = std::env::args().collect();
             let cli_mode = cli::is_function_launch(&argv);
@@ -44,17 +49,38 @@ fn main() {
             if let Some(main_window) = app.get_webview_window("main") {
                 // 다크 캡션 강제(숨겨서 시작)
                 wintheme::apply_window_chrome(&main_window);
+                // 저장된 크기 복원, center 보다 먼저 — 가운데 계산이 복원된 크기 기준
+                let restore_maximized = {
+                    let (s, trusted) = settings::load_checked(app.handle());
+                    if trusted {
+                        let (w, h) = wingeom::restore_size(app.handle(), &s);
+                        let _ = main_window.set_size(tauri::LogicalSize::new(w, h));
+                        s.window_maximized
+                    } else {
+                        false
+                    }
+                };
                 // 기능 창 전용 실행(cli_mode)에서는 메인 창을 표시하지 않는다
                 if !cli_mode {
                     // 인자 없는 실행 = 화면 가운데, 탐색기 열기는 위치를 Windows 에 위임(겹침 방지)
                     if argv.len() <= 1 {
                         let _ = main_window.center();
                     }
+                    // 최대화는 center 다음 — 가운데 정렬이 최대화 상태를 푼다
+                    if restore_maximized {
+                        let _ = main_window.maximize();
+                    }
                     let _ = main_window.show();
                     let _ = main_window.set_focus();
                 }
                 let app_handle = app.handle().clone();
+                let geom_track = geom_setup.clone();
                 main_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Resized(size) = event {
+                        if let Some(w) = app_handle.get_webview_window("main") {
+                            wingeom::track(&geom_track, &w, *size);
+                        }
+                    }
                     if matches!(
                         event,
                         tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
@@ -160,8 +186,10 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("ZipMania 실행 중 오류가 발생했습니다")
         // 이벤트 루프 종료 시 세션 임시 루트(Ara_<랜덤>) 통째 삭제
-        .run(|app_handle, event| {
+        .run(move |app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                // 창 크기 기록, 창은 이미 파괴돼 있으므로 캐시 값으로 저장
+                wingeom::save(app_handle, &geom);
                 // 워커를 끊고 나가지 않는다, 신원 스냅샷과 취소는 한 호출(begin_shutdown)
                 let running = app_handle.state::<JobManager>().begin_shutdown();
                 let retired = app_handle
