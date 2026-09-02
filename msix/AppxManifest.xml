@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ZipMania 스파스 패키지 — Win11 기본 우클릭 메뉴 진입로
+  실행 파일과 DLL 은 이 패키지에 들어가지 않는다(AllowExternalContent), 설치 폴더를 그대로 가리킨다
+  경로는 외부 위치(= 설치 루트) 기준, ZipMania.exe 는 루트, 셸 확장은 shell\x64
+  Publisher = 코드 서명 인증서의 Subject 와 글자 하나까지 동일해야 등록된다
+  Clsid = ZipManiaShell.cpp 의 CLSID_ZipManiaCommand 와 동일
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:desktop10="http://schemas.microsoft.com/appx/manifest/desktop/windows10/10"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 desktop4 desktop5 desktop10 com rescap">
+
+  <Identity
+    Name="Kilhonet.ZipMania"
+    Publisher="CN=Kilho Oh, O=Kilho Oh, L=Seoul, S=Seoul, C=KR"
+    Version="1.0.0.0" />
+
+  <Properties>
+    <DisplayName>ZipMania</DisplayName>
+    <PublisherDisplayName>Kilhonet</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ko-KR" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="ZipMania" Executable="ZipMania.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ZipMania"
+        Description="ZipMania"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop4:ItemType Type="*">
+              <desktop4:Verb Id="ZipMania" Clsid="F58510CC-5B40-48D9-A9FE-120FD5F23DAE" />
+            </desktop4:ItemType>
+            <desktop5:ItemType Type="Directory">
+              <desktop5:Verb Id="ZipMania" Clsid="F58510CC-5B40-48D9-A9FE-120FD5F23DAE" />
+            </desktop5:ItemType>
+            <desktop10:ItemType Type="Drive">
+              <desktop10:Verb Id="ZipMania" Clsid="F58510CC-5B40-48D9-A9FE-120FD5F23DAE" />
+            </desktop10:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="ZipMania Shell Extension">
+              <com:Class Id="F58510CC-5B40-48D9-A9FE-120FD5F23DAE" Path="shell\x64\ZipManiaShell.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

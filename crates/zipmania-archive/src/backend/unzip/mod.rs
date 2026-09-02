@@ -7,6 +7,7 @@
 //!
 //! 이름 읽기 = entry_name 전용, 크레이트 name() 은 CP949 를 CP437 로 오독
 
+pub mod bigfile;
 pub mod create;
 pub mod extract;
 pub mod parallel;

@@ -18,7 +18,7 @@ use crate::backend::{CreateOptions, CreateResult, EditOptions, Progress, Progres
 use crate::error::ZipManiaError;
 use crate::outfile::reserve_tmp;
 
-use super::{canceled, entry_name, parallel, Archive};
+use super::{bigfile, canceled, entry_name, parallel, Archive};
 
 /// 로컬 시간대 오프셋(1회 조회), zip 시각 = 로컬 시간 → UTC 로 적으면 날짜가 시간대만큼 어긋남
 /// 조회 불가 환경(멀티스레드 Unix) = UTC
@@ -28,7 +28,7 @@ fn local_offset() -> time::UtcOffset {
 }
 
 /// SystemTime → zip MS-DOS 시각, 표현 불가 시 None
-fn dos_datetime(t: SystemTime) -> Option<zip::DateTime> {
+pub(super) fn dos_datetime(t: SystemTime) -> Option<zip::DateTime> {
     let odt = time::OffsetDateTime::from(t).to_offset(local_offset());
     zip::DateTime::from_date_and_time(
         u16::try_from(odt.year()).ok()?,
@@ -170,13 +170,20 @@ pub fn do_create(
     // 암호 시 사용 금지 — raw_copy_file 이 암호 정보를 못 옮겨 암호화 바이트가 평문으로 표시됨
     let pw = opts.password.as_deref().filter(|p| !p.is_empty());
     let workers = parallel::worker_count();
-    let elig: Vec<usize> = if pw.is_some() {
+    let lv = opts.level;
+    // 청크 병렬 후보가 바이트의 절반을 넘으면 파일 단위 파이프라인을 열지 않는다
+    // 둘을 함께 돌리면 스레드가 초과 구독되고, 큰 파일이 순차로 밀리면 그쪽이 전체를 지배
+    let chunk_bytes: u64 = items
+        .iter()
+        .filter(|i| bigfile::eligible(i, lv, workers))
+        .map(|i| i.size)
+        .sum();
+    let elig: Vec<usize> = if pw.is_some() || chunk_bytes * 2 > total {
         Vec::new()
     } else {
         parallel::eligible(&items, workers)
     };
     let elig_set: HashSet<usize> = elig.iter().copied().collect();
-    let lv = opts.level;
     let mut pipe = if elig.is_empty() {
         None
     } else {
@@ -249,6 +256,54 @@ pub fn do_create(
             done += item.size;
             on_progress(Progress::new(done, total, Some(name)));
             continue;
+        }
+
+        // 큰 단일 파일 = 청크 병렬 deflate, 파이프라인 워커가 남아 있으면 초과 구독이라 양보
+        if pw.is_none()
+            && !regrew
+            && bigfile::eligible(item, opts.level, workers)
+            && pipe.as_ref().is_none_or(|p| p.drained())
+        {
+            let done_before = done;
+            let big = bigfile::compress(
+                source,
+                item.size,
+                item.mtime,
+                opts.level,
+                &out_path,
+                workers,
+                on_progress,
+                &name,
+                &mut done,
+                total,
+                &cancel,
+            );
+            match big {
+                Err(e) => bail!(zw, pipe, CreateResult::Failed(e)),
+                Ok(bigfile::Outcome::Canceled) => bail!(zw, pipe, canceled_result()),
+                // 크기 불일치 = 실패 아님, 진행량을 되돌리고 순차 경로가 다시 읽는다
+                Ok(bigfile::Outcome::TooBig) => {
+                    done = done_before;
+                    regrew = true;
+                }
+                Ok(bigfile::Outcome::Zip { tmp, file }) => {
+                    let mut one = match zip::ZipArchive::new(file) {
+                        Ok(a) => a,
+                        Err(e) => bail!(zw, pipe, CreateResult::Failed(super::map_err(e, false))),
+                    };
+                    let copied = match one.by_index_raw(0) {
+                        Ok(entry) => zw.raw_copy_file_rename(entry, &name),
+                        Err(e) => bail!(zw, pipe, CreateResult::Failed(super::map_err(e, false))),
+                    };
+                    // 임시 파일 삭제는 핸들을 닫은 뒤(Drop 순서 고정)
+                    drop(one);
+                    drop(tmp);
+                    if let Err(e) = copied {
+                        bail!(zw, pipe, CreateResult::Failed(super::map_err(e, false)));
+                    }
+                    continue;
+                }
+            }
         }
 
         // 나머지(폴더, 큰 파일, 암호) = 스트리밍 압축, 증가 확인 항목만 크기를 다시

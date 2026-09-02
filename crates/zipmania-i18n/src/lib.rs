@@ -102,19 +102,20 @@ pub fn locales_json() -> String {
     s
 }
 
-/// 셸 확장 메뉴 문구, shell. 접두사를 뗀 열 개를 언어 순서로
+/// 셸 확장 메뉴 문구, (정본 키, C 필드명) 짝을 언어 순서로
 pub fn shell_header() -> String {
-    const FIELDS: [&str; 10] = [
-        "shell.compressZipPre",
-        "shell.compressZipPost",
-        "shell.compress",
-        "shell.compressEach",
-        "shell.extractHere",
-        "shell.extractToPre",
-        "shell.extractToPost",
-        "shell.extract",
-        "shell.open",
-        "shell.extractEach",
+    const FIELDS: [(&str, &str); 11] = [
+        ("shell.compressZipPre", "compressZipPre"),
+        ("shell.compressZipPost", "compressZipPost"),
+        ("shell.compress", "compress"),
+        ("shell.compressEach", "compressEach"),
+        ("shell.extractHere", "extractHere"),
+        ("shell.extractToPre", "extractToPre"),
+        ("shell.extractToPost", "extractToPost"),
+        ("shell.extract", "extract"),
+        ("shell.open", "open"),
+        ("shell.extractEach", "extractEach"),
+        ("app.name", "appName"),
     ];
 
     let mut s = String::with_capacity(16 * 1024);
@@ -123,9 +124,9 @@ pub fn shell_header() -> String {
     s.push_str("#pragma once\n\n");
     s.push_str("// 메뉴 문구 한 벌, Pre/Post 는 이름을 사이에 끼우는 앞뒤 조각\n");
     s.push_str("struct MenuText\n{\n");
-    for f in FIELDS {
+    for (_, field) in FIELDS {
         s.push_str("    const wchar_t* ");
-        s.push_str(f.trim_start_matches("shell."));
+        s.push_str(field);
         s.push_str(";\n");
     }
     s.push_str("};\n\n");
@@ -135,11 +136,11 @@ pub fn shell_header() -> String {
         s.push_str("    {");
         c_str(code, &mut s);
         s.push_str(",\n     {");
-        for (j, f) in FIELDS.iter().enumerate() {
+        for (j, (key, _)) in FIELDS.iter().enumerate() {
             if j > 0 {
                 s.push_str(",\n      ");
             }
-            c_str(text(f, code), &mut s);
+            c_str(text(key, code), &mut s);
         }
         s.push_str("}},\n");
         let _ = i;

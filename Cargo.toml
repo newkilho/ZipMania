@@ -14,3 +14,22 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# 압축 핫패스만 속도 우선, 전체를 3 으로 올리면 exe 가 11.3MB -> 14.5MB (실측)
+[profile.release.package.zipmania-archive]
+opt-level = 3
+
+[profile.release.package.zlib-rs]
+opt-level = 3
+
+[profile.release.package.flate2]
+opt-level = 3
+
+[profile.release.package.crc32fast]
+opt-level = 3
+
+[profile.release.package.miniz_oxide]
+opt-level = 3
+
+[profile.release.package.zip]
+opt-level = 3

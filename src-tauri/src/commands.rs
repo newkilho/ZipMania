@@ -450,24 +450,44 @@ fn router(app: &tauri::AppHandle) -> Result<Router, ZipManiaError> {
     Ok(Router::new(dll))
 }
 
-/// ZipManiaShell.dll 절대경로, 7z.dll 과 같은 규약(dev = binaries/, 배포 = exe 옆)
+/// 설치 루트(ZipMania.exe 가 있는 폴더), 스파스 패키지의 외부 위치
+pub fn install_root() -> PathBuf {
+    #[cfg(debug_assertions)]
+    {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries")
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(PathBuf::from))
+            .unwrap_or_default()
+    }
+}
+
+/// ZipManiaShell.dll 절대경로, dev = binaries/shell/x64, 배포 = 설치 루트의 shell/x64
 pub fn shellext_dll_path(app: &tauri::AppHandle) -> String {
     #[cfg(debug_assertions)]
     {
         let _ = app;
         return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("binaries")
-            .join("ZipManiaShell.dll")
+            .join(crate::shell_reg::SHELLEXT_DIR)
+            .join(crate::shell_reg::SHELLEXT_DLL)
             .to_string_lossy()
             .to_string();
     }
     #[cfg(not(debug_assertions))]
     {
-        // 포터블 배포 = exe 옆
         let _ = app;
         std::env::current_exe()
             .ok()
-            .and_then(|e| e.parent().map(|d| d.join("ZipManiaShell.dll")))
+            .and_then(|e| {
+                e.parent().map(|d| {
+                    d.join(crate::shell_reg::SHELLEXT_DIR)
+                        .join(crate::shell_reg::SHELLEXT_DLL)
+                })
+            })
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "ZipManiaShell.dll".to_string())
     }
@@ -1607,7 +1627,9 @@ pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), St
 #[tauri::command]
 pub fn sync_shell_integration(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let dll = shellext_dll_path(&app);
-    crate::shell_reg::sync(enabled, &dll);
+    // 외부 위치는 DLL 폴더가 아니라 설치 루트, 패키지가 거기서 ZipMania.exe 를 찾는다
+    let root = install_root();
+    crate::shell_reg::sync_all(enabled, &root, &dll, false);
     Ok(())
 }
 

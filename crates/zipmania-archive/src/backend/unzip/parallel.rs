@@ -293,6 +293,11 @@ impl Pipeline {
         }
     }
 
+    /// 워커 전원 종료 여부, true = 남은 결과가 전부 회수 대기 상태
+    pub fn drained(&self) -> bool {
+        self.alive.load(Ordering::SeqCst) == 0
+    }
+
     /// 취소, 오류 이탈 시 호출 필수, 미호출 시 예산 대기 워커가 남아 멈춤
     pub fn stop(self) {
         self.stop.store(true, Ordering::Relaxed);

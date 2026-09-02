@@ -5427,7 +5427,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "base64 0.22.1",
  "klib-dialog",
@@ -5452,6 +5452,7 @@ name = "zipmania-archive"
 version = "0.1.0"
 dependencies = [
  "encoding_rs",
+ "flate2",
  "miniz_oxide",
  "serde",
  "thiserror 1.0.69",
@@ -5462,7 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania-i18n"
-version = "0.9.2"
+version = "0.9.3"
 
 [[package]]
 name = "zlib-rs"

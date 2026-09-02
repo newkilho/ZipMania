@@ -11,6 +11,7 @@ mod models;
 mod settings;
 mod file_assoc;
 mod maintenance;
+mod msix;
 mod shell_reg;
 mod shelldrag;
 mod sysicon;
@@ -108,7 +109,7 @@ fn main() {
                 let (s, trusted) = settings::load_checked(handle);
                 // 설정을 읽지 못했으면 건드리지 않는다, 빈 목록 = 모른다이지 끄겠다가 아니다
                 if trusted {
-                    shell_reg::sync(s.shell_integration, &dll);
+                    shell_reg::sync_all(s.shell_integration, &commands::install_root(), &dll, false);
                     // 파일 연결도 재기록 — 포터블 이동 시 등록 exe 경로 어긋남
                     let _ = file_assoc::sync(&s.file_assoc, &update::language(handle));
                 }

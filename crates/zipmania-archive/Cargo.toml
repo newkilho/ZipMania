@@ -14,6 +14,7 @@ thiserror = "1"
 # EGG/ALZ 백엔드(순수 Rust, 플랫폼 무관). C 툴체인을 끌어들이지 않으려고
 # flate2 대신 miniz_oxide 를 직접 쓴다(musl/wasm/Android 크로스 빌드 단순화).
 miniz_oxide = "0.8"
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 encoding_rs = "0.8"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2", "deflate-flate2-zlib-rs", "aes-crypto", "deflate64", "bzip2", "lzma", "xz", "ppmd", "legacy-zip", "time"] }
 time = { version = "0.3.55", features = ["local-offset"] }

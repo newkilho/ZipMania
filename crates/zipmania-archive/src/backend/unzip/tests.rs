@@ -131,6 +131,101 @@ fn make_tree(td: &TempDir) -> Vec<String> {
     vec![td.s("src")]
 }
 
+/// 압축 가능한 의사난수 말뭉치, 씨앗이 같으면 언제나 같은 바이트
+fn corpus(bytes: usize, seed: u64) -> Vec<u8> {
+    let mut x = seed | 1;
+    let mut next = move || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    let words: Vec<Vec<u8>> = (0..4000)
+        .map(|_| {
+            let n = 3 + (next() % 9) as usize;
+            (0..n).map(|_| b'a' + (next() % 26) as u8).collect()
+        })
+        .collect();
+    let mut out = Vec::with_capacity(bytes + 16);
+    while out.len() < bytes {
+        out.extend_from_slice(&words[(next() % 4000) as usize]);
+        out.push(b' ');
+    }
+    out.truncate(bytes);
+    out
+}
+
+/// 청크 압축 출력은 그 청크를 온전히 담는다, 잘리면 이어 붙인 스트림이 중간부터 어긋난다
+#[test]
+fn 청크_압축은_출력을_자르지_않는다() {
+    use std::io::Read;
+    let unit = 128 * 1024;
+    let src = corpus(unit * 256, 0x9E3779B97F4A7C15);
+    for (k, c) in src.chunks(unit).enumerate() {
+        let mut d = super::bigfile::deflate_chunk(c, 5).expect("청크 압축 실패");
+        // 이어 붙인 뒤 최종 빈 블록을 더하는 것이 실제 사용 형태
+        d.extend_from_slice(&[0x03, 0x00]);
+        let mut out = Vec::new();
+        flate2::read::DeflateDecoder::new(&d[..])
+            .read_to_end(&mut out)
+            .unwrap_or_else(|e| panic!("청크 {k} 복원 실패: {e}"));
+        assert_eq!(out.len(), c.len(), "청크 {k} 가 잘렸다");
+        assert!(out == c, "청크 {k} 내용 불일치");
+    }
+}
+
+/// 32MiB 초과 단일 파일 = 청크 병렬 경로, 왕복 바이트 일치
+#[test]
+fn 큰_단일_파일을_청크_병렬로_압축한다() {
+    let td = TempDir::new("bigfile");
+    let body = corpus(33 * 1024 * 1024, 12345);
+    write(&td.join("big.bin"), &body);
+    let arc = td.s("out.zip");
+    let be = Unzip::new();
+    let r = be.create(
+        &create_opts(&arc, &[td.s("big.bin")], 5, None),
+        &mut |_| {},
+        no_cancel(),
+    );
+    assert_eq!(status_of(&r), "ok");
+    let r = be.extract(
+        &extract_opts(&arc, &td.s("out"), None),
+        &mut |_| {},
+        no_cancel(),
+    );
+    assert_eq!(ex_status(&r), "ok");
+    assert!(fs::read(td.join("out/big.bin")).unwrap() == body, "왕복 바이트 불일치");
+}
+
+/// 암호가 걸리면 청크 병렬 경로를 쓰지 않는다, 쓰면 평문이 그대로 실린다
+#[test]
+fn 큰_파일도_암호가_걸리면_순차로_간다() {
+    let td = TempDir::new("bigfile_pw");
+    let body = corpus(33 * 1024 * 1024, 999);
+    write(&td.join("big.bin"), &body);
+    let arc = td.s("out.zip");
+    let be = Unzip::new();
+    let r = be.create(
+        &create_opts(&arc, &[td.s("big.bin")], 5, Some("pw1234")),
+        &mut |_| {},
+        no_cancel(),
+    );
+    assert_eq!(status_of(&r), "ok");
+    let r = be.extract(
+        &extract_opts(&arc, &td.s("no"), None),
+        &mut |_| {},
+        no_cancel(),
+    );
+    assert_eq!(ex_status(&r), "failed:password_required");
+    let r = be.extract(
+        &extract_opts(&arc, &td.s("yes"), Some("pw1234")),
+        &mut |_| {},
+        no_cancel(),
+    );
+    assert_eq!(ex_status(&r), "ok");
+    assert!(fs::read(td.join("yes/big.bin")).unwrap() == body, "왕복 바이트 불일치");
+}
+
 // ─────────────────── 7z.dll 과의 교차 대조(Windows) ───────────────────
 
 #[cfg(windows)]
@@ -156,6 +251,28 @@ mod cross {
             .join("src-tauri")
             .join("binaries")
             .join("7z.exe")
+    }
+
+    /// 청크 병렬로 만든 zip 을 7z.dll 이 같게 푼다, 청크 하나만 잘려도 여기서 깨진다
+    #[test]
+    fn 청크_병렬_산출물을_7z_가_같게_푼다() {
+        let td = TempDir::new("cross_bigfile");
+        let body = corpus(40 * 1024 * 1024, 4242);
+        write(&td.join("big.bin"), &body);
+        let arc = td.s("out.zip");
+        let r = Unzip::new().create(
+            &create_opts(&arc, &[td.s("big.bin")], 5, None),
+            &mut |_| {},
+            no_cancel(),
+        );
+        assert_eq!(status_of(&r), "ok");
+
+        let r = sz().extract(&extract_opts(&arc, &td.s("by7z"), None), &mut |_| {}, no_cancel());
+        assert_eq!(ex_status(&r), "ok");
+        assert!(
+            fs::read(td.join("by7z/big.bin")).unwrap() == body,
+            "7z.dll 해제 결과가 원본과 다르다"
+        );
     }
 
     /// 정상 AES-256 zip 을 손상으로 오진하지 않는다, AE-2 는 로컬 헤더 CRC 를 0 으로 적는다
@@ -625,6 +742,203 @@ fn 병렬_압축을_취소해도_멈추지_않는다() {
         .filter(|n| n.contains(".zmtmp-"))
         .collect();
     assert!(left.is_empty(), "임시 파일이 남았다: {left:?}");
+}
+
+/// 진행 중 취소해도 멈추지 않고 기존 파일과 임시 파일 상태를 지킨다
+/// 첫 진행률 통지 시점 = 첫 청크가 워커로 넘어간 뒤, 여기서 끊기면 join 이 영영 대기
+#[test]
+fn 청크_병렬_압축을_취소해도_멈추지_않는다() {
+    let td = TempDir::new("bigfile_cancel");
+    write(&td.join("big.bin"), &corpus(33 * 1024 * 1024, 7));
+    let out = td.join("out.zip");
+    write(&out, "기존".as_bytes());
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    let r = Unzip::new().create(
+        &create_opts(&out.to_string_lossy(), &[td.s("big.bin")], 5, None),
+        &mut move |_| flag.store(true, std::sync::atomic::Ordering::Relaxed),
+        cancel,
+    );
+    assert_eq!(status_of(&r), "canceled");
+    assert_eq!(fs::read(&out).unwrap(), "기존".as_bytes());
+
+    let left: Vec<_> = fs::read_dir(&td.path)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.contains(".zmtmp-"))
+        .collect();
+    assert!(left.is_empty(), "임시 파일이 남았다: {left:?}");
+}
+
+/// 레벨 0 은 청크 병렬 경로를 타지 않는다, 타면 Store 로 적고 deflate 를 담는다
+#[test]
+fn 큰_파일도_레벨_0_이면_저장만_한다() {
+    let td = TempDir::new("bigfile_store");
+    let body = corpus(33 * 1024 * 1024, 55);
+    write(&td.join("big.bin"), &body);
+    let arc = td.s("out.zip");
+    let be = Unzip::new();
+    let r = be.create(
+        &create_opts(&arc, &[td.s("big.bin")], 0, None),
+        &mut |_| {},
+        no_cancel(),
+    );
+    assert_eq!(status_of(&r), "ok");
+    let n = fs::metadata(&arc).unwrap().len();
+    assert!(n > body.len() as u64, "레벨 0 인데 줄었다: {n}");
+    let r = be.extract(&extract_opts(&arc, &td.s("out"), None), &mut |_| {}, no_cancel());
+    assert_eq!(ex_status(&r), "ok");
+    assert!(fs::read(td.join("out/big.bin")).unwrap() == body, "왕복 바이트 불일치");
+}
+
+/// 큰 파일이 여럿이면 항목마다 임시 파일을 새로 잡는다, 남으면 안 되고 섞여도 안 된다
+#[test]
+fn 큰_파일_여러_개를_한_아카이브에_담는다() {
+    let td = TempDir::new("bigfile_many");
+    let a = corpus(33 * 1024 * 1024, 101);
+    let b = corpus(34 * 1024 * 1024, 202);
+    write(&td.join("src/a.bin"), &a);
+    write(&td.join("src/b.bin"), &b);
+    let arc = td.s("out.zip");
+    let be = Unzip::new();
+    let r = be.create(&create_opts(&arc, &[td.s("src")], 5, None), &mut |_| {}, no_cancel());
+    assert_eq!(status_of(&r), "ok");
+
+    let listed = be.list(&arc, None).unwrap();
+    let f = listed.iter().find(|e| e.path.ends_with("a.bin")).expect("a.bin 없음");
+    // 1980-01-01 = 시각 없음, 청크 경로가 로컬 헤더를 직접 쓰므로 여기서 갈리기 쉽다
+    assert!(!f.modified.starts_with("1980"), "수정 시각이 기본값이다: {}", f.modified);
+
+    let r = be.extract(&extract_opts(&arc, &td.s("out"), None), &mut |_| {}, no_cancel());
+    assert_eq!(ex_status(&r), "ok");
+    assert!(fs::read(td.join("out/src/a.bin")).unwrap() == a, "a.bin 불일치");
+    assert!(fs::read(td.join("out/src/b.bin")).unwrap() == b, "b.bin 불일치");
+
+    let left: Vec<_> = fs::read_dir(&td.path)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.contains(".zmtmp-"))
+        .collect();
+    assert!(left.is_empty(), "임시 파일이 남았다: {left:?}");
+}
+
+/// 수집 시점 크기와 실제가 다르면 청크 병렬을 포기한다
+/// 신고한 만큼만 읽고 끊으면 내용이 잘린 항목이 그대로 아카이브에 들어간다
+#[test]
+fn 크기가_어긋난_큰_파일은_청크_병렬을_포기한다() {
+    use super::bigfile::{self, Outcome};
+    let td = TempDir::new("bigfile_liar");
+    let body = corpus(33 * 1024 * 1024, 77);
+    let src = td.join("big.bin");
+    write(&src, &body);
+    let near = td.join("out.zip");
+
+    for (label, lie) in [("커짐", -1i64), ("줄어듦", 1i64)] {
+        let mut done = 0u64;
+        let size = (body.len() as i64 + lie) as u64;
+        let r = bigfile::compress(
+            &src,
+            size,
+            None,
+            5,
+            &near,
+            4,
+            &mut |_| {},
+            "big.bin",
+            &mut done,
+            size,
+            &no_cancel(),
+        )
+        .expect("실패가 아니라 포기여야 한다");
+        assert!(matches!(r, Outcome::TooBig), "{label} 인데 병렬로 밀었다");
+    }
+
+    let left: Vec<_> = fs::read_dir(&td.path)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.contains(".zmtmp-"))
+        .collect();
+    assert!(left.is_empty(), "임시 파일이 남았다: {left:?}");
+}
+
+/// 작은 파일과 큰 파일이 섞인 입력, 두 갈래를 다 지난다
+/// 큰 파일 바이트가 절반을 넘으면 파일 단위 파이프라인을 열지 않고, 아니면 열고 drained 뒤에 청크로 간다
+#[test]
+fn 작은_파일과_큰_파일이_섞여도_바이트가_같다() {
+    let big = corpus(33 * 1024 * 1024, 31337);
+    // (작은 파일 1개 크기, 개수) — 앞은 청크 우세, 뒤는 파일 단위 우세
+    for (unit, n) in [(1024 * 1024usize, 8usize), (7 * 1024 * 1024, 10)] {
+        let td = TempDir::new(&format!("mix_{n}_{unit}"));
+        for i in 0..n {
+            write(&td.join(&format!("src/a{i:02}.bin")), &vec![b'x'; unit]);
+        }
+        write(&td.join("src/zz_big.bin"), &big);
+        let arc = td.s("out.zip");
+        let be = Unzip::new();
+        let r = be.create(&create_opts(&arc, &[td.s("src")], 5, None), &mut |_| {}, no_cancel());
+        assert_eq!(status_of(&r), "ok", "unit={unit} n={n}");
+
+        let r = be.extract(&extract_opts(&arc, &td.s("out"), None), &mut |_| {}, no_cancel());
+        assert_eq!(ex_status(&r), "ok", "unit={unit} n={n}");
+        assert!(
+            fs::read(td.join("out/src/zz_big.bin")).unwrap() == big,
+            "큰 파일 불일치 unit={unit} n={n}"
+        );
+        for i in 0..n {
+            let got = fs::read(td.join(&format!("out/src/a{i:02}.bin"))).unwrap();
+            assert_eq!(got.len(), unit, "작은 파일 {i} 크기 불일치");
+        }
+    }
+}
+
+/// 자리표 계약, 상한을 지키고 놓아 주면 깨어나고 취소나 수집 중단에서 빠져나온다
+/// 빠져나오지 못하면 압축이 취소도 안 되는 상태로 멈춘다
+#[test]
+fn 자리표는_상한을_지키고_교착되지_않는다() {
+    use super::bigfile::Slots;
+    use std::sync::atomic::Ordering;
+
+    let live = AtomicBool::new(true);
+    let idle = AtomicBool::new(false);
+    let slots = Arc::new(Slots::new(2));
+    assert!(slots.acquire(&idle, &live));
+    assert!(slots.acquire(&idle, &live));
+
+    // 상한이 찼으면 놓아 줄 때까지 기다린다
+    let s2 = slots.clone();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        s2.release();
+    });
+    let start = std::time::Instant::now();
+    assert!(slots.acquire(&idle, &live), "놓아 줬는데도 못 잡았다");
+    assert!(start.elapsed().as_millis() >= 100, "상한을 지키지 않았다");
+    t.join().unwrap();
+    slots.release();
+    slots.release();
+
+    // 취소 = 즉시 포기
+    let full = Arc::new(Slots::new(0));
+    let canceled = AtomicBool::new(true);
+    assert!(!full.acquire(&canceled, &live), "취소인데 잡았다");
+
+    // 수집 중단 = 놓아 줄 사람이 없으므로 포기
+    let dead = AtomicBool::new(false);
+    assert!(!full.acquire(&idle, &dead), "수집이 죽었는데 계속 기다린다");
+
+    // 대기 중에 수집이 죽어도 빠져나온다
+    let gone = Arc::new(AtomicBool::new(true));
+    let g2 = gone.clone();
+    let t = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        g2.store(false, Ordering::Relaxed);
+    });
+    assert!(!full.acquire(&idle, &gone), "죽은 뒤에도 잡았다");
+    t.join().unwrap();
 }
 
 /// 목록이 신고한 크기와 실제가 다르면 ok 가 아니다

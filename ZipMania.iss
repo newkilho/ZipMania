@@ -1,6 +1,7 @@
 ﻿#define MySrcDir           "D:\Vendor\ZipMania"
 #define MyAppExe           MySrcDir + "\ZipMania.exe"
-#define MyShellDll         MySrcDir + "\ZipManiaShell.dll"
+#define MyShellSub         "\shell\x64"
+#define MyShellDll         MySrcDir + MyShellSub + "\ZipManiaShell.dll"
 #define MyAppName          "ZipMania"
 #define MyAppAuthor        "Kilhonet"
 #define MyAppPublisherURL  "https://kilho.net"
@@ -20,7 +21,8 @@
 [Files]
 Source: "{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySrcDir}\7z.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#MyShellDll}"; DestDir: "{app}"; Flags: ignoreversion; Check: ShouldInstallShellDll
+Source: "{#MySrcDir}{#MyShellSub}\ZipManiaShell.msix"; DestDir: "{app}{#MyShellSub}"; Flags: ignoreversion
+Source: "{#MyShellDll}"; DestDir: "{app}{#MyShellSub}"; Flags: ignoreversion; Check: ShouldInstallShellDll
 Source: "{#MySrcDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Setup]
@@ -42,7 +44,6 @@ VersionInfoCopyright={#MyAppAuthor}
 VersionInfoProductName={#MyAppName}
 
 WizardStyle=modern
-SetupIconFile=src-tauri\icons\icon.ico
 
 ShowLanguageDialog=no
 UsePreviousLanguage=no
@@ -132,7 +133,7 @@ end;
 
 function ShellDllPath: String;
 begin
-  Result := ExpandConstant('{app}\') + SHELL_DLL;
+  Result := ExpandConstant('{app}{#MyShellSub}\') + SHELL_DLL;
 end;
 
 function InstalledShellDllVersion: String;

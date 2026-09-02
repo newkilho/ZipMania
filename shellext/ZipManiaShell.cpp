@@ -1,5 +1,6 @@
-// ZipMania 탐색기 셸 확장, 클래식 IContextMenu + IShellExtInit(C++/WinRT, Windows SDK 만)
-// IExplorerCommand 미사용 (D3.7)
+// ZipMania 탐색기 셸 확장, 클래식 IContextMenu + IShellExtInit / IExplorerCommand(C++/WinRT, Windows SDK 만)
+// IContextMenu = 레거시 메뉴, HKCU 등록, IExplorerCommand = Win11 기본 메뉴, 스파스 MSIX 등록 (D3.7)
+// 메뉴 구성은 BuildEntries 한 곳, 두 경로가 같은 목록을 쓴다
 //
 // 메뉴 = 모두 최상위 평면
 //  비-아카이브 "{이름}.zip"(으)로 압축하기 / 집매니아로 압축하기 (여러 개면 각각 압축하기 추가)
@@ -39,6 +40,10 @@ using namespace winrt;
 static constexpr GUID CLSID_ZipManiaMenu = {
     0x02BEA257, 0xB0A9, 0x4B99, {0x9A, 0x99, 0xF3, 0xF6, 0x18, 0x85, 0xD7, 0x71}};
 
+// IExplorerCommand 루트 CLSID — AppxManifest.xml 과 일치, {F58510CC-5B40-48D9-A9FE-120FD5F23DAE}
+static constexpr GUID CLSID_ZipManiaCommand = {
+    0xF58510CC, 0x5B40, 0x48D9, {0xA9, 0xFE, 0x12, 0x0F, 0xD5, 0xF2, 0x3D, 0xAE}};
+
 static HMODULE g_module = nullptr;
 static HBITMAP g_menuBitmap = nullptr; // 메뉴 항목용 ZipMania.exe 아이콘 비트맵(1회 생성, 캐시)
 
@@ -64,7 +69,11 @@ static std::wstring ModuleDir()
     return slash == std::wstring::npos ? p : p.substr(0, slash);
 }
 
-// 앱 실행 파일 경로, HKCU\Software\ZipMania\ShellExt\ExePath 우선, 없으면 DLL 옆
+// 아래 ExePath 가 먼저 쓴다
+static std::wstring ParentDir(const std::wstring& path);
+
+// 앱 실행 파일 경로, HKCU\Software\ZipMania\ShellExt\ExePath 우선
+// 폴백은 DLL 옆이 아니라 두 단계 위, DLL 자리가 <설치 루트>\shell\x64
 static std::wstring ExePath()
 {
     wchar_t buf[MAX_PATH]{};
@@ -75,7 +84,7 @@ static std::wstring ExePath()
     {
         return buf;
     }
-    return ModuleDir() + L"\\ZipMania.exe";
+    return ParentDir(ParentDir(ModuleDir())) + L"\\ZipMania.exe";
 }
 
 static std::wstring ToLower(std::wstring s)
@@ -267,6 +276,83 @@ static HBITMAP MenuBitmap()
     return g_menuBitmap;
 }
 
+// ── 메뉴 목록(두 경로 공용) ──────────────────────────────────────────────────
+
+// 메뉴 항목 하나, verb = ZipMania.exe 에 넘길 CLI 스위치
+struct MenuEntry
+{
+    std::wstring label;
+    const wchar_t* verb;
+};
+
+// 선택 항목 → 메뉴 목록, 선택이 단일 아카이브면 압축 항목 제외
+static std::vector<MenuEntry> BuildEntries(const std::vector<std::wstring>& files)
+{
+    std::vector<MenuEntry> out;
+    if (files.empty()) return out;
+
+    const MenuText& tx = MenuTextForUi();
+    const size_t count = files.size();
+    bool anyArchive = false;
+    for (const auto& f : files)
+        if (IsArchive(f)) anyArchive = true;
+
+    const std::wstring stem = Stem(files.front());
+    // 다중 선택 = 현재 폴더명, 단일 = ArchiveStem(폴더는 이름 그대로)
+    const std::wstring name =
+        count > 1 ? ParentFolderName(files.front()) : ArchiveStem(files.front());
+    // 압축은 단일 아카이브일 때만 숨김(아카이브 여러 개면 하나로 묶어 압축 가능)
+    const bool singleArchive = (count == 1 && anyArchive);
+
+    auto add = [&](std::wstring label, const wchar_t* verb) {
+        out.push_back({std::move(label), verb});
+    };
+
+    if (!singleArchive)
+    {
+        add(tx.compressZipPre + name + tx.compressZipPost, L"--compress-zip");
+        add(tx.compress, L"--compress");
+        if (count > 1) add(tx.compressEach, L"--compress-each");
+    }
+
+    if (anyArchive)
+    {
+        add(tx.extractHere, L"--extract-here");
+        // 단일 선택 전용: {파일명}에 풀기 / 압축 풀기(폼) / 열기, (다중은 아래 "각각 …" 사용)
+        if (count == 1)
+        {
+            add(tx.extractToPre + stem + tx.extractToPost, L"--extract-newfolder");
+            add(tx.extract, L"--extract");
+            add(tx.open, L"--open");
+        }
+        if (count > 1) add(tx.extractEach, L"--extract-each-newfolder");
+    }
+
+    return out;
+}
+
+// IShellItemArray → 파일 시스템 경로 목록, 경로가 없는 항목(가상 폴더)은 건너뜀
+static std::vector<std::wstring> PathsOf(IShellItemArray* items)
+{
+    std::vector<std::wstring> out;
+    if (!items) return out;
+
+    DWORD count = 0;
+    if (FAILED(items->GetCount(&count))) return out;
+    for (DWORD i = 0; i < count; ++i)
+    {
+        com_ptr<IShellItem> item;
+        if (FAILED(items->GetItemAt(i, item.put()))) continue;
+        PWSTR path = nullptr;
+        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path)
+        {
+            out.emplace_back(path);
+            CoTaskMemFree(path);
+        }
+    }
+    return out;
+}
+
 // ── IContextMenu + IShellExtInit 핸들러 ──────────────────────────────────────
 
 struct MenuHandler : implements<MenuHandler, IShellExtInit, IContextMenu>
@@ -307,59 +393,20 @@ struct MenuHandler : implements<MenuHandler, IShellExtInit, IContextMenu>
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
 
         m_verbs.clear();
-        const MenuText& tx = MenuTextForUi();
-        const size_t count = m_files.size();
-        bool anyArchive = false;
-        bool allArchive = !m_files.empty();
-        for (const auto& f : m_files)
-        {
-            if (IsArchive(f))
-                anyArchive = true;
-            else
-                allArchive = false;
-        }
-        const std::wstring stem = m_files.empty() ? L"" : Stem(m_files.front());
-        // 다중 선택 = 현재 폴더명, 단일 = ArchiveStem(폴더는 이름 그대로)
-        const std::wstring name = m_files.empty() ? L""
-                                 : (count > 1 ? ParentFolderName(m_files.front())
-                                              : ArchiveStem(m_files.front()));
-        // 압축은 단일 아카이브일 때만 숨김(아카이브 여러 개면 하나로 묶어 압축 가능)
-        const bool singleArchive = (count == 1 && anyArchive);
+        auto entries = BuildEntries(m_files);
 
         UINT pos = indexMenu;
         UINT cmd = 0;
         HBITMAP icon = MenuBitmap();
-        auto add = [&](const std::wstring& label, const wchar_t* verb) {
-            InsertMenuW(hmenu, pos, MF_BYPOSITION | MF_STRING, idCmdFirst + cmd, label.c_str());
-            if (icon)
-                SetMenuItemBitmaps(hmenu, pos, MF_BYPOSITION, icon, icon);
-            m_verbs.emplace_back(verb);
+        for (const auto& e : entries)
+        {
+            // 배정된 ID 범위를 넘기면 그 자리에서 멈춘다
+            if (idCmdFirst + cmd > idCmdLast) break;
+            InsertMenuW(hmenu, pos, MF_BYPOSITION | MF_STRING, idCmdFirst + cmd, e.label.c_str());
+            if (icon) SetMenuItemBitmaps(hmenu, pos, MF_BYPOSITION, icon, icon);
+            m_verbs.emplace_back(e.verb);
             ++pos;
             ++cmd;
-        };
-
-        // 압축 항목 = 단일 아카이브일 때만 숨김(아카이브 여러 개는 하나로 압축 허용)
-        if (!singleArchive)
-        {
-            add(tx.compressZipPre + name + tx.compressZipPost, L"--compress-zip");
-            add(tx.compress, L"--compress");
-            if (count > 1)
-                add(tx.compressEach, L"--compress-each");
-        }
-
-        // 풀기, 열기 항목: 아카이브가 하나라도 있으면
-        if (anyArchive)
-        {
-            add(tx.extractHere, L"--extract-here");
-            // 단일 선택 전용: {파일명}에 풀기 / 압축 풀기(폼) / 열기, (다중은 아래 "각각 …" 사용)
-            if (count == 1)
-            {
-                add(tx.extractToPre + stem + tx.extractToPost, L"--extract-newfolder");
-                add(tx.extract, L"--extract");
-                add(tx.open, L"--open");
-            }
-            if (count > 1)
-                add(tx.extractEach, L"--extract-each-newfolder");
         }
 
         return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, cmd);
@@ -386,9 +433,181 @@ struct MenuHandler : implements<MenuHandler, IShellExtInit, IContextMenu>
     std::vector<std::wstring> m_verbs; // 메뉴 오프셋 → CLI 스위치
 };
 
+// ── IExplorerCommand 핸들러(Win11 기본 메뉴) ─────────────────────────────────
+
+// 하위 항목 하나, 루트의 하위 메뉴에 평면으로 놓인다
+struct SubCommand : implements<SubCommand, IExplorerCommand>
+{
+    SubCommand(MenuEntry entry, std::vector<std::wstring> files)
+        : m_entry(std::move(entry)), m_files(std::move(files))
+    {
+    }
+
+    HRESULT __stdcall GetTitle(IShellItemArray*, LPWSTR* name) noexcept override
+    {
+        return SHStrDupW(m_entry.label.c_str(), name);
+    }
+    HRESULT __stdcall GetIcon(IShellItemArray*, LPWSTR* icon) noexcept override
+    {
+        // 하위 항목은 아이콘 없음, 루트에만 둔다
+        *icon = nullptr;
+        return E_NOTIMPL;
+    }
+    HRESULT __stdcall GetToolTip(IShellItemArray*, LPWSTR* tip) noexcept override
+    {
+        *tip = nullptr;
+        return E_NOTIMPL;
+    }
+    HRESULT __stdcall GetCanonicalName(GUID* guid) noexcept override
+    {
+        *guid = GUID_NULL;
+        return S_OK;
+    }
+    HRESULT __stdcall GetState(IShellItemArray*, BOOL, EXPCMDSTATE* state) noexcept override
+    {
+        *state = ECS_ENABLED;
+        return S_OK;
+    }
+    HRESULT __stdcall Invoke(IShellItemArray* items, IBindCtx*) noexcept override
+    {
+        // 넘어온 항목 우선, 비어 있으면 루트가 떠 둔 목록
+        std::vector<std::wstring> files = PathsOf(items);
+        Launch(m_entry.verb, files.empty() ? m_files : files);
+        return S_OK;
+    }
+    HRESULT __stdcall GetFlags(EXPCMDFLAGS* flags) noexcept override
+    {
+        *flags = ECF_DEFAULT;
+        return S_OK;
+    }
+    HRESULT __stdcall EnumSubCommands(IEnumExplorerCommand** e) noexcept override
+    {
+        *e = nullptr;
+        return E_NOTIMPL;
+    }
+
+  private:
+    MenuEntry m_entry;
+    std::vector<std::wstring> m_files;
+};
+
+struct CommandEnum : implements<CommandEnum, IEnumExplorerCommand>
+{
+    CommandEnum(std::vector<MenuEntry> entries, std::vector<std::wstring> files)
+        : m_entries(std::move(entries)), m_files(std::move(files))
+    {
+    }
+
+    HRESULT __stdcall Next(ULONG celt, IExplorerCommand** out, ULONG* fetched) noexcept override
+    {
+        ULONG n = 0;
+        for (; n < celt && m_index < m_entries.size(); ++n, ++m_index)
+        {
+            try
+            {
+                out[n] = make<SubCommand>(m_entries[m_index], m_files)
+                             .as<IExplorerCommand>()
+                             .detach();
+            }
+            catch (...)
+            {
+                if (fetched) *fetched = n;
+                return to_hresult();
+            }
+        }
+        if (fetched) *fetched = n;
+        return n == celt ? S_OK : S_FALSE;
+    }
+    HRESULT __stdcall Skip(ULONG celt) noexcept override
+    {
+        m_index += celt;
+        return m_index <= m_entries.size() ? S_OK : S_FALSE;
+    }
+    HRESULT __stdcall Reset() noexcept override
+    {
+        m_index = 0;
+        return S_OK;
+    }
+    HRESULT __stdcall Clone(IEnumExplorerCommand** out) noexcept override
+    {
+        *out = nullptr;
+        return E_NOTIMPL;
+    }
+
+  private:
+    std::vector<MenuEntry> m_entries;
+    std::vector<std::wstring> m_files;
+    size_t m_index = 0;
+};
+
+// 루트 항목, Win11 기본 메뉴에 "집매니아" 하나로 뜨고 하위에 실제 명령을 편다
+// EnumSubCommands 에는 선택 항목이 넘어오지 않으므로 GetState/GetTitle 에서 떠 둔다
+struct RootCommand : implements<RootCommand, IExplorerCommand>
+{
+    HRESULT __stdcall GetTitle(IShellItemArray* items, LPWSTR* name) noexcept override
+    {
+        Capture(items);
+        return SHStrDupW(MenuTextForUi().appName, name);
+    }
+    HRESULT __stdcall GetIcon(IShellItemArray*, LPWSTR* icon) noexcept override
+    {
+        std::wstring path = ExePath() + L",0";
+        return SHStrDupW(path.c_str(), icon);
+    }
+    HRESULT __stdcall GetToolTip(IShellItemArray*, LPWSTR* tip) noexcept override
+    {
+        *tip = nullptr;
+        return E_NOTIMPL;
+    }
+    HRESULT __stdcall GetCanonicalName(GUID* guid) noexcept override
+    {
+        *guid = GUID_NULL;
+        return S_OK;
+    }
+    HRESULT __stdcall GetState(IShellItemArray* items, BOOL, EXPCMDSTATE* state) noexcept override
+    {
+        Capture(items);
+        // 낼 항목이 없으면 루트 자체를 숨긴다(빈 하위 메뉴 방지)
+        *state = m_entries.empty() ? ECS_HIDDEN : ECS_ENABLED;
+        return S_OK;
+    }
+    HRESULT __stdcall Invoke(IShellItemArray*, IBindCtx*) noexcept override { return S_OK; }
+    HRESULT __stdcall GetFlags(EXPCMDFLAGS* flags) noexcept override
+    {
+        *flags = ECF_HASSUBCOMMANDS;
+        return S_OK;
+    }
+    HRESULT __stdcall EnumSubCommands(IEnumExplorerCommand** e) noexcept override
+    {
+        *e = nullptr;
+        try
+        {
+            *e = make<CommandEnum>(m_entries, m_files).as<IEnumExplorerCommand>().detach();
+            return S_OK;
+        }
+        catch (...)
+        {
+            return to_hresult();
+        }
+    }
+
+  private:
+    void Capture(IShellItemArray* items)
+    {
+        if (!items || m_captured) return;
+        m_captured = true;
+        m_files = PathsOf(items);
+        m_entries = BuildEntries(m_files);
+    }
+
+    std::vector<std::wstring> m_files;
+    std::vector<MenuEntry> m_entries;
+    bool m_captured = false;
+};
+
 // ── COM 클래스 팩토리 + DLL 진입점 ───────────────────────────────────────────
 
-struct ClassFactory : implements<ClassFactory, IClassFactory>
+template <typename T> struct ClassFactory : implements<ClassFactory<T>, IClassFactory>
 {
     HRESULT __stdcall CreateInstance(IUnknown* outer, REFIID riid, void** obj) noexcept override
     {
@@ -396,7 +615,7 @@ struct ClassFactory : implements<ClassFactory, IClassFactory>
         if (outer) return CLASS_E_NOAGGREGATION;
         try
         {
-            return make<MenuHandler>()->QueryInterface(riid, obj);
+            return make<T>()->QueryInterface(riid, obj);
         }
         catch (...)
         {
@@ -417,7 +636,9 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** instance)
     {
         *instance = nullptr;
         if (rclsid == CLSID_ZipManiaMenu)
-            return make<ClassFactory>()->QueryInterface(riid, instance);
+            return make<ClassFactory<MenuHandler>>()->QueryInterface(riid, instance);
+        if (rclsid == CLSID_ZipManiaCommand)
+            return make<ClassFactory<RootCommand>>()->QueryInterface(riid, instance);
         return CLASS_E_CLASSNOTAVAILABLE;
     }
     catch (...)

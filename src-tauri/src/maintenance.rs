@@ -51,8 +51,9 @@ fn apply(register: bool) -> Result<(), String> {
     let lang = crate::update::language_from(&settings.language);
 
     if register {
-        // 셸 확장은 설정과 무관하게 등록
-        crate::shell_reg::register(&dll_path()).map_err(|e| format!("셸 확장 등록 실패: {e}"))?;
+        // 셸 확장은 설정과 무관하게 등록, Win11 은 패키지 경로를 먼저 시도
+        // 설치/갱신에서는 무조건 다시 등록, 매니페스트가 바뀌었을 수 있다
+        crate::shell_reg::sync_all(true, &root_dir(), &dll_path(), true);
         if !settings_usable {
             eprintln!("[maintenance] 설정을 읽지도 옮기지도 못해 파일 연결은 건너뜁니다.");
             return Ok(());
@@ -73,6 +74,7 @@ fn apply(register: bool) -> Result<(), String> {
             .map_err(|e| format!("파일 연결 등록 실패: {e}"))?;
     } else {
         // 제거: 레지스트리 흔적만 삭제, 설정 파일은 .iss 의 UninstallDelete 담당, KUID 는 공유라 미삭제
+        let _ = crate::msix::unregister();
         let _ = crate::shell_reg::unregister();
         // 빈 목록 동기화 시 우리가 잡고 있던 확장자가 원래 프로그램으로 복원
         let _ = crate::file_assoc::sync(&[], &lang);
@@ -87,11 +89,16 @@ fn apply(_register: bool) -> Result<(), String> {
 
 /// 셸 확장 DLL = exe 와 같은 폴더에 평면 배치(포터블, 설치형 동일)
 #[cfg(windows)]
-fn dll_path() -> String {
+fn root_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(PathBuf::from))
         .unwrap_or_default()
+}
+
+fn dll_path() -> String {
+    root_dir()
+        .join(crate::shell_reg::SHELLEXT_DIR)
         .join(crate::shell_reg::SHELLEXT_DLL)
         .to_string_lossy()
         .to_string()

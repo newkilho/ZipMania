@@ -1,6 +1,6 @@
 [package]
 name = "zipmania"
-version = "0.9.2"
+version = "0.9.3"
 description = "ZipMania - 현대적 Windows 압축 프로그램"
 authors = ["BNO Corp"]
 edition = "2021"
@@ -59,6 +59,11 @@ windows = { version = "0.61", features = [
     "Win32_System_Threading",
     # 업데이트 확인에 보낼 OS 언어: GetUserDefaultLocaleName.
     "Win32_Globalization",
+    # 스파스 MSIX 등록/해제: PackageManager, AddPackageOptions.
+    "Management_Deployment",
+    "ApplicationModel",
+    "Foundation",
+    "Foundation_Collections",
 ] }
 # #[implement] 매크로가 생성하는 코드가 `windows_core` 크레이트 경로를 참조하므로 명시적으로 둔다.
 windows-core = "0.61"

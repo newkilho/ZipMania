@@ -20,8 +20,8 @@
 //   **코드를 고쳤으면 반드시 여기도 고친다.** 안 고치면 설치 프로그램이 "이미 같은 버전"
 //   으로 보고 새 DLL 을 덮어쓰지 않는다.
 
-#define ZMS_VER      2026,8,25,0
-#define ZMS_VER_STR  "2026.8.25.0"
+#define ZMS_VER      2026,9,2,1
+#define ZMS_VER_STR  "2026.9.2.1"
 
 #include <winver.h>
 
