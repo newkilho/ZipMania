@@ -938,12 +938,6 @@
 
         <!-- 압축 후 처리 옵션 -->
         <div class="p2-checks">
-          <label class="check dis" title={$t("common.comingSoon")}>
-            <input type="checkbox" disabled /> {$t("compress.afterTest")}
-          </label>
-          <label class="check dis" title={$t("common.comingSoon")}>
-            <input type="checkbox" disabled /> {$t("compress.afterDelete")}
-          </label>
           <label class="check" title={$t("compress.eachNameTitle")}>
             <input type="checkbox" bind:checked={eachMode} /> {$t("compress.eachName")}
           </label>
@@ -1196,10 +1190,6 @@
     font-size: 13px;
     color: var(--text);
     cursor: pointer;
-  }
-  .check.dis {
-    color: var(--text-muted);
-    cursor: not-allowed;
   }
   .p2-checks {
     display: flex;

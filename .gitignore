@@ -30,5 +30,9 @@ target
 # 내 맘
 *.bat
 
+# 셸 확장 빌드 산출물, shellext 의 build.bat 이 Z: 배포 폴더로 옮긴다
+shellext/ZipManiaShell.dll
+shellext/ZipManiaShell.msix
+
 # vite 가 설정을 로드할 때 만드는 임시 파일(빌드 부산물)
 vite.config.js.timestamp-*

@@ -2,6 +2,7 @@
 //! 자리 = *\ShellEx\ContextMenuHandlers\ZipMania, Directory\ShellEx\… CLSID 는 ZipManiaShell.cpp 와 동일(D3.7)
 //! 등록 판정 = CLSID InprocServer32 + 핸들러 키 2개 + DLL 파일 실재, 셋 모두
 //! 메뉴 경로 선택 = sync_all 한 곳, Win11 은 스파스 MSIX, 그 아래는 클래식 HKCU
+//! UAC 해제(승격 셸)는 Win11 이어도 클래식, 승격 프로세스에 패키지 신원 미부여
 
 #![allow(dead_code)]
 
@@ -185,7 +186,8 @@ pub fn sync_all(enabled: bool, root: &std::path::Path, dll: &str, force: bool) {
         return;
     }
 
-    if crate::msix::is_win11() {
+    // 승격된 셸은 패키지 확장을 못 띄우므로 클래식으로 간다, 옛 등록은 치운다
+    if crate::msix::is_win11() && crate::msix::shell_hosts_packages() {
         // 갱신에서 다시 걸지 않으면 매니페스트를 고쳐도 옛 등록이 그대로 남는다
         // 등록 자리가 바뀐 판으로 올라간 사용자는 메뉴가 조용히 죽는다
         let ok = if force || !crate::msix::is_registered() {

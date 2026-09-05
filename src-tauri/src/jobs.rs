@@ -86,6 +86,11 @@ impl JobManager {
                 "이미 진행 중인 작업이 있습니다. 완료 후 다시 시도하세요.",
             ));
         }
+        // 크래시 리포트의 notes 구역에 실린다, 죽은 순간 무엇을 하고 있었는지
+        klib_except::note(&format!("job {} {} [{}]", info.kind, info.target, id));
+        // 7z.dll 은 첫 작업에서 지연 로드된다, 모듈표는 설치 때 떠 두므로 그때는 없다
+        klib_except::refresh_modules();
+
         let flag = std::sync::Arc::new(AtomicBool::new(false));
         st.active.insert(
             id.to_string(),

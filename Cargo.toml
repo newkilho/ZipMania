@@ -13,7 +13,10 @@ resolver = "2"
 codegen-units = 1
 lto = true
 opt-level = "s"
-strip = true
+strip = "symbols"
+# 크래시 리포트의 주소를 함수명으로 되돌리려면 PDB 가 있어야 한다.
+# 배포에는 들어가지 않고 target 에만 남는다 — 버전별로 보관할 것.
+debug = 1
 
 # 압축 핫패스만 속도 우선, 전체를 3 으로 올리면 exe 가 11.3MB -> 14.5MB (실측)
 [profile.release.package.zipmania-archive]

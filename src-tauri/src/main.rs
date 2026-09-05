@@ -6,6 +6,7 @@ mod assoc_icon;
 mod assoc_picker;
 mod cli;
 mod commands;
+mod except;
 mod jobs;
 mod models;
 mod settings;
@@ -23,6 +24,14 @@ use jobs::JobManager;
 use tauri::Manager;
 
 fn main() {
+    // 패닉, 네이티브 크래시 기록, 되도록 이르게 걸어야 그 뒤의 사고부터 남는다
+    except::install();
+
+    // 오류 보고 확인용 접근 위반, 릴리스에도 남긴다, 배포본에서 확인할 수 없으면 확인이 아니다
+    if std::env::args().any(|a| a == "--crash-test") {
+        unsafe { std::ptr::write_volatile(0x10 as *mut u8, 1u8) };
+    }
+
     // /inst, /uninst 는 창 없이 처리하고 끝낸다, Tauri 를 띄우기 전에 가로챌 것
     let argv: Vec<String> = std::env::args().collect();
     if let Some(code) = maintenance::run(&argv) {

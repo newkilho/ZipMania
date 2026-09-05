@@ -1985,6 +1985,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "klib-except"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "ureq",
+ "windows",
+]
+
+[[package]]
 name = "klib-update"
 version = "0.1.0"
 dependencies = [
@@ -5427,10 +5436,11 @@ dependencies = [
 
 [[package]]
 name = "zipmania"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "base64 0.22.1",
  "klib-dialog",
+ "klib-except",
  "klib-update",
  "png 0.17.16",
  "serde",
@@ -5463,7 +5473,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania-i18n"
-version = "0.9.3"
+version = "0.9.4"
 
 [[package]]
 name = "zlib-rs"

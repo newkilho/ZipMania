@@ -14,11 +14,11 @@ Visual Studio **Build Tools 2022** + **Windows SDK** 만 필요하다(NuGet·Win
 
 | 스크립트 | 역할 |
 |---|---|
-| `shellext\build.bat` | **DLL만** 빌드 → `src-tauri\binaries\ZipManiaShell.dll` |
+| `shellext\build.bat` | **DLL + 스파스 MSIX** 빌드 → `src-tauri\binaries\shell\x64\` 로 복사, `Z:\Release\shell\x64\` 로 이동(shellext 에는 남지 않는다) |
 | `build.bat`(루트) | **앱 exe만** 빌드(`tauri build --no-bundle`) + 포터블 폴더 `Z:\Release` 조립 |
 | `debug.bat`(루트) | dev 실행(`npm run tauri dev`) |
 
-빌드 순서: **① `shellext\build.bat` → ② `build.bat`**. (build.bat 은 `binaries\ZipManiaShell.dll` 이 있어야 tauri 리소스 번들이 통과한다.)
+빌드 순서: **① `shellext\build.bat` → ② `build.bat`**. (build.bat 은 `binaries\shell\x64\ZipManiaShell.dll` 이 있어야 tauri 리소스 번들이 통과한다.)
 
 - DLL: `cl.exe`(MSVC) + Windows SDK 의 cppwinrt(`winrt/base.h`)·`shobjidl_core.h` 로 컴파일.
 - 포터블 산출물(**평면 배치** — 하위 폴더 없이 같은 폴더): `Z:\Release\ZipMania.exe` + `Z:\Release\ZipManiaShell.dll`. **`7z.dll` 은 직접** `Z:\Release\`(ZipMania.exe 옆)에 넣는다.

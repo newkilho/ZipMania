@@ -83,11 +83,14 @@ pub fn spawn(app: &tauri::AppHandle) {
 }
 
 /// 서버에 보낼 버전 문자열, 서버는 문자열 동일 여부만 확인, ZIPMANIA_UPDATE_VERSION 으로 덮어쓰기 가능
+/// 서버 목록이 4자리라 semver 3자리에 .0 을 붙인다, 오류 보고도 같은 규칙
 fn version() -> String {
-    std::env::var("ZIPMANIA_UPDATE_VERSION")
+    let raw = std::env::var("ZIPMANIA_UPDATE_VERSION")
         .ok()
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
+    format!("{raw}.0")
 }
 
 /// 다이얼로그를 띄운다, 띄우지 못하면 None

@@ -52,6 +52,22 @@ mod imp {
         build_number() >= WIN11_BUILD
     }
 
+    /// 셸이 패키지 확장을 로드할 수 있는 환경 여부(D3.7)
+    /// UAC 해제 = 셸 전체가 승격 토큰, 승격 프로세스에 패키지 신원 미부여
+    pub fn shell_hosts_packages() -> bool {
+        use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
+        use winreg::RegKey;
+        RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey_with_flags(
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+                KEY_READ,
+            )
+            .ok()
+            .and_then(|k| k.get_value::<u32, _>("EnableLUA").ok())
+            .map(|v| v != 0)
+            .unwrap_or(true)
+    }
+
     // 경로 → file:// URI, Uri::CreateUri 는 절대 URI 만 받는다
     fn file_uri(path: &Path) -> windows::core::Result<Uri> {
         let s = path.to_string_lossy().replace('\\', "/");
@@ -142,7 +158,7 @@ mod imp {
 // ── 공개 API(플랫폼 무관 래퍼) ───────────────────────────────────────────────
 
 #[cfg(windows)]
-pub use imp::{is_registered, is_win11, register, unregister};
+pub use imp::{is_registered, is_win11, register, shell_hosts_packages, unregister};
 
 #[cfg(not(windows))]
 pub fn is_win11() -> bool {
@@ -151,6 +167,10 @@ pub fn is_win11() -> bool {
 #[cfg(not(windows))]
 pub fn is_registered() -> bool {
     false
+}
+#[cfg(not(windows))]
+pub fn shell_hosts_packages() -> bool {
+    true
 }
 #[cfg(not(windows))]
 pub fn register(_root: &std::path::Path) -> Result<(), String> {
