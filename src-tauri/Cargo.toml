@@ -56,8 +56,10 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Dwm",
     # 확장자별 기본 앱 선택 창: SetWinEventHook 으로 속성 창이 만들어지는 순간을 잡는다.
     "Win32_UI_Accessibility",
-    # 위 판정에 쓰는 GetCurrentProcessId.
+    # 위 판정에 쓰는 GetCurrentProcessId. 토큰을 여는 OpenProcessToken 도 여기에 있다.
     "Win32_System_Threading",
+    # 내장 Administrator 판정(msix): GetTokenInformation(TokenUser) + SID 의 RID 500.
+    "Win32_Security",
     # 업데이트 확인에 보낼 OS 언어: GetUserDefaultLocaleName.
     "Win32_Globalization",
     # 스파스 MSIX 등록/해제: PackageManager, AddPackageOptions.

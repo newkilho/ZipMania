@@ -52,9 +52,8 @@ mod imp {
         build_number() >= WIN11_BUILD
     }
 
-    /// 셸이 패키지 확장을 로드할 수 있는 환경 여부(D3.7)
-    /// UAC 해제 = 셸 전체가 승격 토큰, 승격 프로세스에 패키지 신원 미부여
-    pub fn shell_hosts_packages() -> bool {
+    // UAC 정책값, 없거나 읽지 못하면 None
+    fn policy_dword(name: &str) -> Option<u32> {
         use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
         use winreg::RegKey;
         RegKey::predef(HKEY_LOCAL_MACHINE)
@@ -63,9 +62,77 @@ mod imp {
                 KEY_READ,
             )
             .ok()
-            .and_then(|k| k.get_value::<u32, _>("EnableLUA").ok())
-            .map(|v| v != 0)
-            .unwrap_or(true)
+            .and_then(|k| k.get_value::<u32, _>(name).ok())
+    }
+
+    /// 셸이 패키지 확장을 로드할 수 있는 환경 여부(D3.7)
+    /// 승격된 셸 = 패키지 신원 미부여, UAC 해제와 내장 Administrator 둘 다 해당
+    pub fn shell_hosts_packages() -> bool {
+        hosts_packages(
+            policy_dword("EnableLUA"),
+            policy_dword("FilterAdministratorToken"),
+            is_builtin_administrator(),
+        )
+    }
+
+    /// 정책값과 계정 종류만으로 하는 판정, 레지스트리 접근 없음
+    /// 애매하면 false — 클래식은 메뉴 자리만 나빠지고, 반대로 틀리면 메뉴가 사라진다
+    pub(super) fn hosts_packages(
+        enable_lua: Option<u32>,
+        filter_admin_token: Option<u32>,
+        builtin_admin: bool,
+    ) -> bool {
+        // UAC 해제 = 셸 전체가 승격 토큰, 값이 없으면 켜진 것이 기본
+        if enable_lua.unwrap_or(1) == 0 {
+            return false;
+        }
+        if !builtin_admin {
+            return true;
+        }
+        // 내장 Administrator 는 승인 모드가 켜졌을 때만 비승격 토큰, 기본값은 꺼짐
+        filter_admin_token.unwrap_or(0) != 0
+    }
+
+    /// 현재 계정이 내장 Administrator(RID 500) 인지, 판정 불가는 false
+    /// 실패를 true 로 두면 모든 Win11 사용자가 클래식으로 떨어진다
+    fn is_builtin_administrator() -> bool {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::Security::{
+            GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenUser,
+            TOKEN_QUERY, TOKEN_USER,
+        };
+        use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+        const DOMAIN_USER_RID_ADMIN: u32 = 500;
+
+        unsafe {
+            let mut token = HANDLE::default();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+                return false;
+            }
+
+            // 1회차는 길이만, TOKEN_USER 는 SID 가 뒤에 붙는 가변 길이
+            let mut len = 0u32;
+            let _ = GetTokenInformation(token, TokenUser, None, 0, &mut len);
+            let mut buf = vec![0u8; len as usize];
+            let got = len as usize >= std::mem::size_of::<TOKEN_USER>()
+                && GetTokenInformation(
+                    token,
+                    TokenUser,
+                    Some(buf.as_mut_ptr().cast()),
+                    len,
+                    &mut len,
+                )
+                .is_ok();
+            let _ = CloseHandle(token);
+            if !got {
+                return false;
+            }
+
+            let sid = (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+            let count = *GetSidSubAuthorityCount(sid);
+            count > 0 && *GetSidSubAuthority(sid, u32::from(count) - 1) == DOMAIN_USER_RID_ADMIN
+        }
     }
 
     // 경로 → file:// URI, Uri::CreateUri 는 절대 URI 만 받는다
@@ -271,4 +338,28 @@ mod tests {
             "AllowExternalContent 가 없으면 외부 위치 등록이 거부된다"
         );
     }
+
+    /// 승격된 셸에는 패키지 신원이 없다, UAC 정책은 실물로 만들 수 없어 판정 함수로 고정
+    #[cfg(windows)]
+    #[test]
+    fn 승격된_셸은_패키지를_쓰지_않는다() {
+        use super::imp::hosts_packages;
+
+        // 보통 사용자 — 패키지가 Win11 기본 메뉴에 오른다
+        assert!(hosts_packages(Some(1), Some(0), false));
+        assert!(hosts_packages(None, None, false), "정책값이 없으면 UAC 켜짐이 기본");
+
+        // UAC 해제 — 셸 전체가 승격 토큰
+        assert!(!hosts_packages(Some(0), Some(0), false));
+        assert!(!hosts_packages(Some(0), Some(1), true));
+
+        // 내장 Administrator — UAC 가 켜져 있어도 승인 모드 밖이면 승격 토큰
+        assert!(
+            !hosts_packages(Some(1), Some(0), true),
+            "여기서 참을 주면 패키지만 걸고 클래식을 내려 메뉴가 통째로 사라진다"
+        );
+        assert!(!hosts_packages(Some(1), None, true), "FilterAdministratorToken 기본값은 꺼짐");
+        assert!(hosts_packages(Some(1), Some(1), true), "승인 모드면 비승격 토큰");
+    }
 }
+
