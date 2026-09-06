@@ -27,9 +27,9 @@ png = "0.17"
 base64 = "0.22"
 
 # 공용 라이브러리(KLib). 업데이트 확인과 네이티브 다이얼로그.
-klib-update = { path = "../../KLib/crates/klib-update" }
-klib-dialog = { path = "../../KLib/crates/klib-dialog" }
-klib-except = { path = "../../KLib/crates/klib-except" }
+klib-update = { path = "D:/Component/Rust/KLib/crates/klib-update" }
+klib-dialog = { path = "D:/Component/Rust/KLib/crates/klib-dialog" }
+klib-except = { path = "D:/Component/Rust/KLib/crates/klib-except" }
 
 # Windows 전용: 확장자별 시스템 아이콘 추출(SHGetFileInfoW 등).
 [target.'cfg(windows)'.dependencies]
