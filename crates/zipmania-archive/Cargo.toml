@@ -5,6 +5,7 @@ description = "ZipMania 압축모듈 — ArchiveBackend 추상화 + 7z 백엔드
 authors = ["BNO Corp"]
 edition = "2021"
 rust-version = "1.88"
+license = "MIT OR Apache-2.0"
 
 # Tauri 의존 금지. ZipManiaError/ArchiveEntry 직렬화를 위해 serde 를 의존한다.
 [dependencies]

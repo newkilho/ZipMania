@@ -143,8 +143,6 @@ fn main() {
         .manage(commands::TempRoot::new())
         // 탐색기 통합: 파일당 실행의 argv 를 모으는 취합 버퍼
         .manage(cli::Aggregator::default())
-        // 화면이 뜨기 전에 도착한 업데이트 공지 보관소
-        .manage(update::PendingNotify::default())
         // IPC command 등록
         .invoke_handler(tauri::generate_handler![
             commands::sevenzip_version,
@@ -189,9 +187,7 @@ fn main() {
             commands::get_settings,
             commands::save_settings,
             commands::sync_shell_integration,
-            commands::open_settings_window,
-            update::open_update_url,
-            update::get_update_notify
+            commands::open_settings_window
         ])
         .build(tauri::generate_context!())
         .expect("ZipMania 실행 중 오류가 발생했습니다")

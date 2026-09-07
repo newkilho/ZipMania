@@ -1,31 +1,11 @@
 //! 업데이트 확인(앱 시작 1회), 로직은 klib_update, klib_dialog, 여기는 시점, 부모 창, 동의 후 동작만
 //! 자동 교체 아님
-//! 시작 → 서버 조회 → 다이얼로그 → 예: 브라우저 + 종료 / 아니오: 없음 / notify: 상태줄 배지(update:notify)
+//! 시작 → 서버 조회 → 다이얼로그 → 예: 브라우저 + 종료 / 아니오: 없음 / notify: 네이티브 알림 바
 
-use std::sync::Mutex;
-
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 /// 조회 주소, 저장소 루트 .env 의 UPDATE_URL 을 build.rs 가 박는다, 앱마다 다름
 const UPDATE_URL: &str = env!("UPDATE_URL");
-
-/// 상태줄 배지에 실어 보내는 정보
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotifyPayload {
-    url: String,
-    text: String,
-}
-
-/// 화면 준비 전 도착한 공지 보관, 화면은 get_update_notify 로 1회 조회 후 이벤트 수신
-#[derive(Default)]
-pub struct PendingNotify(Mutex<Option<NotifyPayload>>);
-
-/// 보관된 공지 반환(비우지 않음)
-#[tauri::command]
-pub fn get_update_notify(state: tauri::State<'_, PendingNotify>) -> Option<NotifyPayload> {
-    state.0.lock().ok().and_then(|v| v.clone())
-}
 
 /// 백그라운드 업데이트 확인(실패는 무시), 스레드 생성 + 다이얼로그도 그 스레드에서
 pub fn spawn(app: &tauri::AppHandle) {
@@ -48,17 +28,19 @@ pub fn spawn(app: &tauri::AppHandle) {
             eprintln!("[update] 서버 응답: {err}");
         }
 
-        // 공지는 다이얼로그 없이 상태줄에만 띄운다
-        if let Some(url) = info.notify.clone() {
-            let payload = NotifyPayload {
-                url,
-                text: klib_update::text::notify(&lang).to_string(),
-            };
-            // 선보관, 화면이 늦게 떠도 즉시 회수 가능하도록
-            if let Ok(mut slot) = app.state::<PendingNotify>().0.lock() {
-                *slot = Some(payload.clone());
+        // 공지는 다이얼로그 없이 메인 창 아래 알림 바로 띄운다(델파이 TKUpdateBar 와 같은 자리).
+        // 창이 아직 안 떴어도 그냥 부른다 — 바가 소유 창이라 호스트가 뜨는 순간 함께 뜬다.
+        if let Some(url) = info.notify.as_deref() {
+            if let Some(parent) = main_hwnd(&app) {
+                let bar = klib_dialog::Bar {
+                    text: klib_update::text::notify(&lang),
+                    url,
+                    parent,
+                };
+                if let Err(e) = klib_dialog::show_bar(&bar) {
+                    eprintln!("[update] 알림 바 실패: {e}");
+                }
             }
-            let _ = app.emit("update:notify", payload);
         }
 
         let Some(update_url) = info.update.clone() else {
@@ -149,6 +131,23 @@ fn parent_hwnd(app: &tauri::AppHandle) -> Option<isize> {
     }
 }
 
+/// 메인 창 핸들, 보이는지는 보지 않는다 — 알림 바는 숨은 창에도 붙여 두고 뜰 때 따라 뜬다
+fn main_hwnd(app: &tauri::AppHandle) -> Option<isize> {
+    #[cfg(windows)]
+    {
+        return app
+            .get_webview_window("main")?
+            .hwnd()
+            .ok()
+            .map(|h| h.0 as isize);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 /// 안내 문구 언어 코드, 설정 언어 또는 OS 언어, 앱 UI 언어에 맞추기 금지 — klib_update::text 는 9개 언어(U)
 pub fn language(app: &tauri::AppHandle) -> String {
     language_from(&crate::settings::load(app).language)
@@ -180,16 +179,6 @@ fn os_language() -> String {
 #[cfg(not(windows))]
 fn os_language() -> String {
     std::env::var("LANG").unwrap_or_default()
-}
-
-/// 상태줄 배지를 클릭했을 때 공지 주소를 연다
-#[tauri::command]
-pub fn open_update_url(url: String) -> Result<(), String> {
-    // 프런트 값이므로 http(s) 만 허용
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("http(s) 주소만 열 수 있습니다.".into());
-    }
-    open_url(&url)
 }
 
 /// 기본 브라우저로 주소를 연다(델파이 NewIE)

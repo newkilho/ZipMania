@@ -185,7 +185,7 @@
 </main>
 
 <ProgressPanel />
-<StatusBar {preview} />
+<StatusBar />
 
 <PasswordDialog />
 <TestResultDialog />

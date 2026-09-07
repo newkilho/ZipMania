@@ -4,6 +4,7 @@ version = "0.9.4"
 description = "ZipMania - UI 텍스트 정본과 생성기"
 edition = "2021"
 rust-version = "1.88"
+license = "MIT OR Apache-2.0"
 
 # 의존성 없음 — 정본을 읽는 쪽(앱)이 무엇을 쓰든 딸려 들어가지 않게
 [dependencies]

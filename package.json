@@ -2,6 +2,7 @@
   "name": "zipmania",
   "version": "0.1.0",
   "description": "ZipMania - Windows용 현대적 압축 프로그램 (Tauri + Svelte)",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "npm run gen && vite",

@@ -1,6 +1,9 @@
                              Open Source License
                        -------------------------------
 
+   ZipMania itself is licensed under the Apache License 2.0. The full text and
+   the source code are at https://github.com/newkilho/ZipMania .
+
    ZipMania uses these open-source projects - many thanks to their creators.
 
 
@@ -14,6 +17,9 @@
 	ZipMania links to 7z.dll dynamically and does not modify it. A copy of
 	the LGPL and the complete 7-Zip source code are available at
 	https://www.7-zip.org/ .
+
+	7z.dll is loaded at run time from the installation folder, so you may
+	replace it with your own build of the same interface.
 
 	The RAR handling code inside 7-Zip carries an additional restriction
 	from the unRAR license:

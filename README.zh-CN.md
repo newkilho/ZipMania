@@ -4,7 +4,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Formats](https://img.shields.io/badge/read-50%2B_formats-green)
-![License](https://img.shields.io/badge/license-Freeware-lightgrey)
+![License](https://img.shields.io/badge/license-Apache_2.0-lightgrey)
 
 可打开 50 多种压缩格式，并创建 **7Z · ZIP · TAR** 的 Windows 压缩软件。
 支持快速 ZIP 处理、预览以及资源管理器右键菜单。
@@ -47,3 +47,15 @@
 ## 作者
 
 **Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+
+## 许可证
+
+程序本身是**免费软件**。公司、家庭、政府机关、学校均可无限制免费使用，
+没有广告，也没有捆绑安装。
+
+源代码采用 **Apache License 2.0**（见 `LICENSE`）。`crates/` 下的可复用
+crate 采用 **MIT 或 Apache-2.0** 双许可。“ZipMania”名称、徽标和图标是
+Kilho.net 的商标，不在该许可证范围内 — 分发修改版本时请使用其他名称和图标。
+
+ZipMania 捆绑了 7-Zip 的 `7z.dll`（LGPL）等开源组件，
+详见 `THIRD-PARTY-NOTICES.txt`。

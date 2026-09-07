@@ -4,7 +4,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Formats](https://img.shields.io/badge/read-50%2B_formats-green)
-![License](https://img.shields.io/badge/license-Freeware-lightgrey)
+![License](https://img.shields.io/badge/license-Apache_2.0-lightgrey)
 
 A Windows archive manager that opens 50+ archive formats and creates **7Z · ZIP · TAR**.
 Fast ZIP processing, built-in preview, and Explorer right-click integration.
@@ -47,3 +47,16 @@ A dedicated ZIP engine handles ZIP archives directly.
 ## Author
 
 **Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+
+## License
+
+The program itself is **freeware** - free for anyone, at home, at work, at
+school or in government, with no ads and no bundled installers.
+
+The source code is licensed under the **Apache License 2.0** (see `LICENSE`).
+The reusable crates under `crates/` are dual licensed as **MIT OR Apache-2.0**.
+The "ZipMania" name, logos and icons are trademarks of Kilho.net and are not
+covered by that license - distribute modified versions under a different name.
+
+ZipMania bundles 7-Zip's `7z.dll` (LGPL) and other open-source components.
+See `THIRD-PARTY-NOTICES.txt`.

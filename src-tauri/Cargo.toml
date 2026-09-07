@@ -5,6 +5,7 @@ description = "ZipMania - 현대적 Windows 압축 프로그램"
 authors = ["BNO Corp"]
 edition = "2021"
 rust-version = "1.88"
+license = "Apache-2.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

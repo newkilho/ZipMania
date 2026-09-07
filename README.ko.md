@@ -4,7 +4,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Formats](https://img.shields.io/badge/read-50%2B_formats-green)
-![License](https://img.shields.io/badge/license-Freeware-lightgrey)
+![License](https://img.shields.io/badge/license-Apache_2.0-lightgrey)
 
 50여 가지 압축 파일을 열고 **7Z · ZIP · TAR**로 압축하는 Windows용 압축 프로그램.
 빠른 ZIP 처리와 미리보기, 탐색기 우클릭 메뉴를 지원합니다.
@@ -47,3 +47,16 @@ ZIP 전용 엔진을 사용해 빠르게 처리합니다.
 ## 만든 이
 
 **Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+
+## 라이선스
+
+프로그램 자체는 **프리웨어**입니다. 회사, 집, 관공서, 학교 어디서든 제약 없이
+무료로 쓸 수 있고 광고나 번들 설치가 없습니다.
+
+소스 코드는 **Apache License 2.0** 을 따릅니다(`LICENSE`). `crates/` 의 재사용
+크레이트는 **MIT 또는 Apache-2.0** 이중 라이선스입니다. "ZipMania", "집매니아"
+이름과 로고, 아이콘은 Kilho.net 의 상표라 이 라이선스에 포함되지 않습니다 —
+고쳐서 배포할 때는 다른 이름과 아이콘을 쓰세요.
+
+7-Zip 의 `7z.dll`(LGPL)을 비롯한 오픈소스 구성 요소는
+`THIRD-PARTY-NOTICES.txt` 에 있습니다.

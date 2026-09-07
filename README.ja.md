@@ -4,7 +4,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Formats](https://img.shields.io/badge/read-50%2B_formats-green)
-![License](https://img.shields.io/badge/license-Freeware-lightgrey)
+![License](https://img.shields.io/badge/license-Apache_2.0-lightgrey)
 
 50 種類以上の書庫を開き、**7Z · ZIP · TAR** で圧縮する Windows 用アーカイバ。
 高速な ZIP 処理とプレビュー、エクスプローラーの右クリックメニューに対応しています。
@@ -47,3 +47,16 @@ ZIP 専用エンジンで高速に処理します。
 ## 作者
 
 **Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+
+## ライセンス
+
+プログラム自体は**フリーウェア**です。会社、家庭、官公庁、学校を問わず制限なく
+無料で使用でき、広告やバンドルインストールはありません。
+
+ソースコードは **Apache License 2.0** です(`LICENSE`)。`crates/` の再利用
+クレートは **MIT または Apache-2.0** のデュアルライセンスです。「ZipMania」の
+名称、ロゴ、アイコンは Kilho.net の商標であり、このライセンスには含まれません —
+改変版を配布する場合は別の名称とアイコンを使用してください。
+
+7-Zip の `7z.dll`(LGPL)をはじめとするオープンソース構成要素は
+`THIRD-PARTY-NOTICES.txt` にまとめてあります。

@@ -605,32 +605,6 @@ export async function deleteFile(path) {
 }
 
 /**
- * 업데이트 공지 구독, 앱 시작 시 서버 조회 후 1회 발행
- * @param {(payload: {url: string, text: string}) => void} handler
- * @returns {Promise<() => void>} 구독 해제 함수
- */
-export async function onUpdateNotify(handler) {
-  return await listen("update:notify", (event) => handler(event.payload));
-}
-
-/**
- * 보관된 업데이트 공지 조회(없으면 null), 화면이 뜨자마자 1회 호출
- * @returns {Promise<{url: string, text: string} | null>}
- */
-export async function getUpdateNotify() {
-  return await invoke("get_update_notify");
-}
-
-/**
- * 업데이트 공지 주소를 기본 브라우저로
- * @param {string} url http(s) 주소
- * @returns {Promise<void>}
- */
-export async function openUpdateUrl(url) {
-  return await invoke("open_update_url", { url });
-}
-
-/**
  * 폴더를 탐색기로 열기
  * @param {string} path 열 폴더 경로
  * @returns {Promise<void>}

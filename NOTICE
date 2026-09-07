@@ -1,0 +1,24 @@
+ZipMania (집매니아)
+Copyright (c) 2026 Kilho.net
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full text.
+
+The reusable crates under crates/ (zipmania-archive, zipmania-i18n) are
+additionally available under the MIT license, at your option:
+
+    SPDX-License-Identifier: MIT OR Apache-2.0
+
+Trademarks
+----------
+"ZipMania", "집매니아", and the ZipMania logos and icons are trademarks of
+Kilho.net. As stated in section 6 of the Apache License, this license does
+not grant permission to use them. Distribute modified versions under a
+different name and icon.
+
+Third-party components
+----------------------
+This product bundles and links to software from other authors, including
+7-Zip (7z.dll), which is licensed under the GNU Lesser General Public
+License. See THIRD-PARTY-NOTICES.txt for the complete list, the applicable
+license texts, and the additional unRAR restriction.
