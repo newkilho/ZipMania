@@ -10,7 +10,7 @@
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        min-width: 680px;
+        min-width: 780px;
         min-height: 100vh;
         padding: 16px;
         color: var(--text);
@@ -19,23 +19,23 @@
         font-size: var(--font-size);
       }
       .preview-tools {
-        width: 640px;
+        width: 100%;
+        max-width: 1040px;
         margin: 0 auto 12px;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
       }
-      .preview-tools strong { flex: 1; }
+      .preview-tools strong { flex: 1 0 auto; }
       .preview-tools span { color: var(--text-muted); font-size: 12px; }
-      .theme-switch,
-      .mode-switch {
+      .switch {
         display: inline-flex;
         overflow: hidden;
         border: 1px solid var(--border);
         border-radius: 7px;
       }
-      .theme-switch button,
-      .mode-switch button {
+      .switch button {
         padding: 5px 11px;
         border: 0;
         border-left: 1px solid var(--border);
@@ -44,10 +44,9 @@
         font: inherit;
         cursor: pointer;
       }
-      .theme-switch button:first-child,
-      .mode-switch button:first-child { border-left: 0; }
-      .theme-switch button.on,
-      .mode-switch button.on { color: var(--accent-contrast); background: var(--accent); }
+      .switch button:first-child { border-left: 0; }
+      .switch button.on { color: var(--accent-contrast); background: var(--accent); }
+      .switch[hidden] { display: none; }
       #app {
         width: 640px;
         height: 600px;
@@ -60,12 +59,23 @@
   <body>
     <div class="preview-tools">
       <strong>ZipMania 실제 컴포넌트 미리보기</strong>
-      <span>640 × 600</span>
-      <div class="mode-switch" aria-label="화면 상태 선택">
-        <button type="button" data-preview-mode="archive" class="on">파일 열림</button>
-        <button type="button" data-preview-mode="empty">파일 없음</button>
+      <span id="size-label">640 × 600</span>
+      <div class="switch" id="screen-switch" aria-label="창 선택">
+        <button type="button" data-screen="main" class="on">메인</button>
+        <button type="button" data-screen="compress">압축</button>
+        <button type="button" data-screen="extract">해제</button>
+        <button type="button" data-screen="settings">설정</button>
       </div>
-      <div class="theme-switch" aria-label="테마 선택">
+      <div class="switch" id="mode-switch" aria-label="메인 창 상태 선택">
+        <button type="button" data-preview-mode="archive" class="on">열림</button>
+        <button type="button" data-preview-mode="empty">기본</button>
+      </div>
+      <div class="switch" id="phase-switch" aria-label="작업 단계 선택" hidden>
+        <button type="button" data-phase="form" class="on">옵션</button>
+        <button type="button" data-phase="running">진행</button>
+        <button type="button" data-phase="done">완료</button>
+      </div>
+      <div class="switch" id="theme-switch" aria-label="테마 선택">
         <button type="button" data-theme-value="system" class="on">시스템</button>
         <button type="button" data-theme-value="light">라이트</button>
         <button type="button" data-theme-value="dark">다크</button>
@@ -74,24 +84,92 @@
     <div id="app"></div>
     <script src="./preview/preview.js"></script>
     <script>
-      const buttons = document.querySelectorAll("[data-theme-value]");
+      // 창 크기는 Rust 의 창 생성 크기와 같다(commands.rs), 진행 화면은 두 창 공통 520x340
+      const SIZES = {
+        main: [640, 600],
+        compress: [680, 620],
+        extract: [760, 600],
+        settings: [720, 520],
+        job: [480, 440],
+      };
+
+      const appEl = document.getElementById("app");
+      const sizeLabel = document.getElementById("size-label");
+      const screenButtons = document.querySelectorAll("[data-screen]");
       const modeButtons = document.querySelectorAll("[data-preview-mode]");
-      const initialMode = new URLSearchParams(location.search).get("mode") === "empty" ? "empty" : "archive";
-      modeButtons.forEach((item) => item.classList.toggle("on", item.dataset.previewMode === initialMode));
-      buttons.forEach((button) => {
+      const phaseButtons = document.querySelectorAll("[data-phase]");
+      const themeButtons = document.querySelectorAll("[data-theme-value]");
+      const modeSwitch = document.getElementById("mode-switch");
+      const phaseSwitch = document.getElementById("phase-switch");
+
+      // ?screen=compress&phase=running 처럼 주소로 바로 열 수 있다(스크린샷, 북마크용)
+      const params = new URLSearchParams(location.search);
+      const SCREENS = ["main", "compress", "extract", "settings"];
+      let screen = SCREENS.includes(params.get("screen")) ? params.get("screen") : "main";
+      let phase = ["form", "running", "done"].includes(params.get("phase"))
+        ? params.get("phase")
+        : "form";
+
+      function markOn(list, match) {
+        list.forEach((item) => item.classList.toggle("on", match(item)));
+      }
+
+      function applyScreen() {
+        const isJobWindow = screen === "compress" || screen === "extract";
+        modeSwitch.hidden = screen !== "main";
+        phaseSwitch.hidden = !isJobWindow;
+
+        const key = isJobWindow && phase !== "form" ? "job" : screen;
+        const [w, h] = SIZES[key] || SIZES.main;
+        appEl.style.width = w + "px";
+        appEl.style.height = h + "px";
+        sizeLabel.textContent = w + " × " + h;
+
+        window.dispatchEvent(
+          new CustomEvent("zipmania-preview-screen", { detail: { screen, phase } }),
+        );
+      }
+
+      const initialMode = params.get("mode") === "empty" ? "empty" : "archive";
+      markOn(modeButtons, (item) => item.dataset.previewMode === initialMode);
+      markOn(screenButtons, (item) => item.dataset.screen === screen);
+      markOn(phaseButtons, (item) => item.dataset.phase === phase);
+
+      screenButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          screen = button.dataset.screen;
+          markOn(screenButtons, (item) => item === button);
+          applyScreen();
+        });
+      });
+
+      phaseButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          phase = button.dataset.phase;
+          markOn(phaseButtons, (item) => item === button);
+          applyScreen();
+        });
+      });
+
+      modeButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          window.dispatchEvent(
+            new CustomEvent("zipmania-preview-mode", { detail: button.dataset.previewMode }),
+          );
+          markOn(modeButtons, (item) => item === button);
+        });
+      });
+
+      themeButtons.forEach((button) => {
         button.addEventListener("click", () => {
           const theme = button.dataset.themeValue;
           if (theme === "system") document.documentElement.removeAttribute("data-theme");
           else document.documentElement.dataset.theme = theme;
-          buttons.forEach((item) => item.classList.toggle("on", item === button));
+          markOn(themeButtons, (item) => item === button);
         });
       });
-      modeButtons.forEach((button) => {
-        button.addEventListener("click", () => {
-          window.dispatchEvent(new CustomEvent("zipmania-preview-mode", { detail: button.dataset.previewMode }));
-          modeButtons.forEach((item) => item.classList.toggle("on", item === button));
-        });
-      });
+
+      applyScreen();
     </script>
   </body>
 </html>

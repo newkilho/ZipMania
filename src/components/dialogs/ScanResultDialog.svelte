@@ -44,7 +44,7 @@
   <div class="overlay" data-ui="scan-result-dialog" on:click={closeScan}>
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
     <div class="card" data-ui="dialog-card" on:click|stopPropagation on:keydown={onKeydown}>
-      <div class="head">
+      <div class="head" data-ui="dialog-head">
         <h2>
           {$t("scan.title")}
           {#if done}
@@ -74,9 +74,10 @@
         {/if}
       </p>
 
-      <div class="bar">
+      <div class="bar" data-ui="progress-bar">
         <div
           class="fill"
+          data-ui="progress-fill"
           class:err={done && verdict === "threat"}
           class:warn={done && verdict === "incomplete"}
           style="width: {done ? 100 : $scanState.percent}%"
@@ -87,7 +88,7 @@
         <div class="cur" title={$scanState.currentFile}>{$scanState.currentFile || ""}</div>
       {:else if !$scanState.error}
         <div class="hint">{$t("scan.skipHint")}</div>
-        <div class="table-wrap">
+        <div class="table-wrap" data-ui="result-table">
           <table>
             <thead>
               <tr>
@@ -109,7 +110,7 @@
         </div>
       {/if}
 
-      <div class="foot">
+      <div class="foot" data-ui="dialog-foot">
         <div class="summary">
           <span class="chip">{$t("scan.sumTotal", { count: total })}</span>
           <span class="chip ok">{$t("scan.sumClean", { count: cleanCount })}</span>

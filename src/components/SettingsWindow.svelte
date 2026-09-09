@@ -21,6 +21,9 @@
     onWindowFocus,
   } from "../lib/api.js";
 
+  // 스킨 미리보기 전용 — 백엔드 미호출, 기본값으로 렌더, 실제 창은 기본값 그대로
+  export let preview = false;
+
   // 좌측 카테고리(첨부 이미지 구성), gap=true 는 위에 간격을 둔다(언어 설정 분리)
   const CATEGORIES = [
     { id: "general", labelKey: "settings.catGeneral" },
@@ -63,6 +66,10 @@
   $: setCurrentWindowTitle($t("settings.title")).catch(() => {});
 
   onMount(async () => {
+    if (preview) {
+      loaded = true;
+      return;
+    }
     try {
       apply(await getSettings());
     } catch (e) {
@@ -275,7 +282,7 @@
   <div class="main">
     <!-- 좌측: 카테고리 + 하단 초기화/확인 -->
     <aside class="sidebar" data-ui="settings-sidebar">
-      <nav class="cats">
+      <nav class="cats" data-ui="settings-nav">
         {#each CATEGORIES as cat}
           <button
             type="button"
@@ -289,7 +296,7 @@
         {/each}
       </nav>
       <!-- [확인]이 없다. 바꾸는 즉시 저장되므로 확정할 것이 없고, [닫기]는 창만 닫는다. -->
-      <div class="side-actions">
+      <div class="side-actions" data-ui="settings-actions">
         <button class="btn" on:click={onReset} disabled={!loaded}>{$t("settings.reset")}</button>
         <button class="btn primary" on:click={() => closeCurrentWindow()}>
           {$t("common.close")}

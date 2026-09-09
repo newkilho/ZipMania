@@ -74,8 +74,8 @@
       <span class="elapsed">{fmtElapsed(elapsed)}</span>
       <button class="cancel" on:click={cancelActiveJob}>{$t("common.cancel")}</button>
     </div>
-    <div class="bar">
-      <div class="fill" style="width: {$activeJob.percent}%"></div>
+    <div class="bar" data-ui="progress-bar">
+      <div class="fill" data-ui="progress-fill" style="width: {$activeJob.percent}%"></div>
     </div>
   </div>
 {/if}

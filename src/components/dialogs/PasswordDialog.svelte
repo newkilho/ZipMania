@@ -47,7 +47,7 @@
         <p class="error">{$passwordState.error}</p>
       {/if}
 
-      <div class="actions">
+      <div class="actions" data-ui="dialog-actions">
         <button class="ghost" on:click={onCancel}>{$t("common.cancel")}</button>
         <button class="primary" on:click={onSubmit} disabled={$loading || !password}>
           {$loading ? $t("common.checking") : $t("common.open")}

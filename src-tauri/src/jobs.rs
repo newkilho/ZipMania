@@ -197,6 +197,68 @@ impl JobManager {
     }
 }
 
+/// 진행률 emit 간격 제한, 첫 건과 마감(100%)은 항상 통과
+pub struct ProgressGate {
+    last: Option<std::time::Instant>,
+}
+
+impl Default for ProgressGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProgressGate {
+    /// 최소 간격 = 20fps, 사람 눈에 연속으로 보이는 경계
+    pub const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+    pub fn new() -> Self {
+        ProgressGate { last: None }
+    }
+
+    /// 지금 보낼지 판정, 통과시키면 시각 갱신
+    pub fn allow(&mut self, percent: u8) -> bool {
+        self.allow_at(percent, std::time::Instant::now())
+    }
+
+    /// 시각 주입판(테스트)
+    pub fn allow_at(&mut self, percent: u8, now: std::time::Instant) -> bool {
+        let pass = percent >= 100
+            || match self.last {
+                None => true,
+                Some(t) => now.duration_since(t) >= Self::MIN_INTERVAL,
+            };
+        if pass {
+            self.last = Some(now);
+        }
+        pass
+    }
+}
+
+/// job:progress 발행 클로저, 백엔드 콜백에 그대로 넘긴다(간격 제한 포함)
+pub fn progress_emitter(
+    app: tauri::AppHandle,
+    job_id: String,
+) -> impl FnMut(zipmania_archive::Progress) {
+    use tauri::Emitter;
+    let mut gate = ProgressGate::new();
+    move |p: zipmania_archive::Progress| {
+        if !gate.allow(p.percent) {
+            return;
+        }
+        let _ = app.emit(
+            "job:progress",
+            crate::models::JobProgress {
+                job_id: job_id.clone(),
+                percent: p.percent,
+                current_file: p.current_file.unwrap_or_default(),
+                done: p.done,
+                total: p.total,
+            },
+        );
+    }
+}
+
 /// 작업 등록 RAII 보증, 값 소멸 시 등록 해제 보장
 /// 정상 경로는 release 를 손으로 부른다(결과 emit 전에)
 pub struct JobGuard {
@@ -225,6 +287,25 @@ impl Drop for JobGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    /// 간격 제한: 첫 건 통과, 간격 미달 차단, 마감(100%)은 언제나 통과
+    #[test]
+    fn 진행률_이벤트는_간격을_지킨다() {
+        let t0 = std::time::Instant::now();
+        let mut gate = ProgressGate::new();
+        assert!(gate.allow_at(1, t0), "첫 건을 막았다");
+        assert!(!gate.allow_at(2, t0 + Duration::from_millis(10)), "간격 미달을 통과시켰다");
+        assert!(gate.allow_at(3, t0 + ProgressGate::MIN_INTERVAL), "간격을 채웠는데 막았다");
+        assert!(
+            !gate.allow_at(4, t0 + ProgressGate::MIN_INTERVAL + Duration::from_millis(1)),
+            "직전 통과 시각을 갱신하지 않았다"
+        );
+        assert!(
+            gate.allow_at(100, t0 + ProgressGate::MIN_INTERVAL + Duration::from_millis(2)),
+            "마감을 막았다, 진행률이 100 이 되지 않는다"
+        );
+    }
 
     /// 테스트용 신원
     fn info(owner: &str) -> JobInfo {

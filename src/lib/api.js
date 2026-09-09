@@ -170,8 +170,8 @@ export async function listDirChildren(path) {
 
 /**
  * 폴더 브라우저 바로가기(즐겨찾기 + 드라이브) 목록
- * @returns {Promise<Array<{kind:string, name:string, path:string}>>}
- *  kind: "desktop"|"documents"|"downloads"|"home"|"drive"
+ * @returns {Promise<Array<{kind:string, name:string, path:string, icon:string|null}>>}
+ *  kind: "desktop"|"downloads"|"documents"|"pictures"|"music"|"home"|"drive"
  */
 export async function listQuickAccess() {
   return await invoke("list_quick_access");

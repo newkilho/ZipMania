@@ -5436,7 +5436,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "base64 0.22.1",
  "klib-dialog",
@@ -5473,7 +5473,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania-i18n"
-version = "0.9.4"
+version = "0.9.5"
 
 [[package]]
 name = "zlib-rs"

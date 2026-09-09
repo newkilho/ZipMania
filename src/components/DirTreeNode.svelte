@@ -11,6 +11,7 @@
   export let onSelect; // (path) => void
   export let depth = 0;
   export let revealPath = ""; // 마운트 시 이 경로까지 자동으로 펼침(선택 상태 포함)
+  export let onContext = null; // (path, event) => void, 우클릭 메뉴
 
   let expanded = false;
   let children = null; // null = 아직 로드 안 함
@@ -56,9 +57,16 @@
     if (onSelect) onSelect(node.path);
   }
 
+  function contextSelf(e) {
+    if (!onContext) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onContext(node.path, e);
+  }
+
   onMount(async () => {
-    // 대상 경로가 이 노드 하위에 있으면 자동으로 펼쳐 트리에 드러낸다(하위 노드가 연쇄로 처리)
-    if (node.hasChildren && revealPath && isAncestor(node.path, revealPath)) {
+    // 대상 경로가 이 노드 하위에 있거나 이 노드 자신이면 자동으로 펼친다(하위 노드가 연쇄로 처리)
+    if (node.hasChildren && revealPath && (isAncestor(node.path, revealPath) || norm(node.path) === norm(revealPath))) {
       await loadChildren();
       expanded = true;
     }
@@ -76,6 +84,7 @@
   tabindex="0"
   on:click={selectSelf}
   on:dblclick={toggle}
+  on:contextmenu={contextSelf}
   on:keydown={(e) => (e.key === "Enter" ? selectSelf() : null)}
 >
   {#if node.hasChildren}
@@ -99,7 +108,7 @@
 
 {#if expanded && children}
   {#each children as child (child.path)}
-    <svelte:self node={child} depth={depth + 1} {selectedPath} {onSelect} {revealPath} />
+    <svelte:self node={child} depth={depth + 1} {selectedPath} {onSelect} {onContext} {revealPath} />
   {/each}
 {/if}
 

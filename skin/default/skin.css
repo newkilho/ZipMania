@@ -5,7 +5,7 @@
  * This file only supplies visual values and optional background images.
  */
 
-:root[data-skin="default"] {
+:root {
   color-scheme: light;
   --font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-size: 13px;
@@ -81,7 +81,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root[data-skin="default"]:not([data-theme="light"]) {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #1e1e1e;
     --surface: #252526;
@@ -125,7 +125,7 @@
   }
 }
 
-:root[data-skin="default"][data-theme="dark"] {
+:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #1e1e1e;
   --surface: #252526;
@@ -169,8 +169,8 @@
 }
 
 /* Optional background images applied without changing the original layout. */
-:root[data-skin="default"] body,
-:root[data-skin="default"] #app {
+:root body,
+:root #app {
   background-color: var(--bg);
   background-image: var(--skin-app-background);
   background-position: var(--skin-background-position);
@@ -180,7 +180,7 @@
 
 /* 툴바 모양은 전부 위의 --toolbar-* 변수로 결정된다.
    라이트는 오션 물결, 다크는 평평한 --surface 툴바로 값만 갈린다. */
-:root[data-skin="default"] body #app [data-ui="toolbar"] {
+:root body #app [data-ui="toolbar"] {
   background-color: var(--toolbar-bg);
   background-image: var(--skin-toolbar-background), var(--toolbar-layers);
   background-position: var(--skin-background-position), left bottom, center, center;
@@ -191,26 +191,26 @@
   padding: var(--toolbar-padding);
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] button {
+:root body #app [data-ui=toolbar] button {
   --accent-contrast: var(--toolbar-btn-ink);
   color: var(--toolbar-btn-text);
   text-shadow: var(--toolbar-btn-shadow);
   transition: background-color .12s ease, border-color .12s ease, transform .12s ease;
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] button svg {
+:root body #app [data-ui=toolbar] button svg {
   color: var(--toolbar-btn-icon);
   filter: var(--toolbar-btn-icon-filter);
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] button:hover:not(:disabled) {
+:root body #app [data-ui=toolbar] button:hover:not(:disabled) {
   background: var(--toolbar-btn-hover-bg);
   border-color: var(--toolbar-btn-hover-border);
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] button:active:not(:disabled),
-:root[data-skin=default] body #app [data-ui=toolbar] button.active,
-:root[data-skin=default] body #app [data-ui=toolbar] button.active:hover:not(:disabled) {
+:root body #app [data-ui=toolbar] button:active:not(:disabled),
+:root body #app [data-ui=toolbar] button.active,
+:root body #app [data-ui=toolbar] button.active:hover:not(:disabled) {
   background: var(--toolbar-btn-on-bg);
   border-color: var(--toolbar-btn-on-border);
   color: var(--toolbar-btn-on-text);
@@ -218,51 +218,160 @@
   transform: var(--toolbar-btn-on-shift);
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] button:active:not(:disabled) svg,
-:root[data-skin=default] body #app [data-ui=toolbar] button.active svg {
+:root body #app [data-ui=toolbar] button:active:not(:disabled) svg,
+:root body #app [data-ui=toolbar] button.active svg {
   color: var(--toolbar-btn-on-icon);
   filter: none;
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] button:active:not(:disabled),
-:root[data-skin=default] body #app [data-ui=toolbar] button.active {
+:root body #app [data-ui=toolbar] button:active:not(:disabled),
+:root body #app [data-ui=toolbar] button.active {
   --accent-contrast: #ffffff;
 }
 
-:root[data-skin=default] body #app [data-ui=toolbar] span.divider {
+:root body #app [data-ui=toolbar] span.divider {
   background: var(--toolbar-divider);
 }
 
-:root[data-skin="default"] body #app [data-ui="sidebar"],
-:root[data-skin="default"] body #app [data-ui="folder-tree"],
-:root[data-skin="default"] body #app [data-ui="preview-pane"] {
+:root body #app [data-ui="sidebar"],
+:root body #app [data-ui="folder-tree"],
+:root body #app [data-ui="preview-pane"] {
   background-image: var(--skin-sidebar-background);
   background-position: var(--skin-background-position);
   background-size: var(--skin-background-size);
   background-repeat: no-repeat;
 }
 
-:root[data-skin="default"] body #app [data-ui="file-table"],
-:root[data-skin="default"] body #app [data-ui="app-main"] {
+:root body #app [data-ui="file-table"],
+:root body #app [data-ui="app-main"] {
   background-image: var(--skin-content-background);
   background-position: var(--skin-background-position);
   background-size: var(--skin-background-size);
   background-repeat: no-repeat;
 }
 
-:root[data-skin="default"] body #app [data-ui="empty-state"] {
+:root body #app [data-ui="empty-state"] {
   background-image: var(--skin-empty-background);
   background-position: var(--skin-background-position);
   background-size: var(--skin-background-size);
   background-repeat: no-repeat;
 }
 
-:root[data-skin="default"] body #app [data-ui="dialog-card"],
-:root[data-skin="default"] body #app [data-ui="compress-window"],
-:root[data-skin="default"] body #app [data-ui="extract-window"],
-:root[data-skin="default"] body #app [data-ui="settings-window"] {
+:root body #app [data-ui="dialog-card"],
+:root body #app [data-ui="compress-window"],
+:root body #app [data-ui="extract-window"],
+:root body #app [data-ui="settings-window"] {
   background-image: var(--skin-dialog-background);
   background-position: var(--skin-background-position);
   background-size: var(--skin-background-size);
   background-repeat: no-repeat;
+}
+
+/* Shared compression / extraction progress and result layout. */
+:root body #app [data-ui="job-view"] {
+  gap: 12px;
+  padding: 20px 22px 16px;
+  overflow: hidden;
+}
+
+:root body #app [data-ui="job-title"],
+:root body #app [data-ui="job-result"] {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+:root body #app [data-ui="job-title"] { color: var(--text); }
+:root body #app [data-ui="job-result"] .r-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 17px;
+}
+:root body #app [data-ui="job-result"].ok .r-ic { background: var(--ok-bg); }
+:root body #app [data-ui="job-result"].warn .r-ic { background: var(--warn-bg); }
+:root body #app [data-ui="job-result"].err .r-ic { background: var(--alert-bg); }
+
+:root body #app [data-ui="job-view"] [data-ui="progress-bar"] {
+  width: 100%;
+  height: 6px;
+  flex-shrink: 0;
+  margin-top: 4px;
+  border-radius: 99px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
+}
+:root body #app [data-ui="job-view"] [data-ui="progress-fill"] { border-radius: inherit; }
+:root body #app [data-ui="job-view"] [data-ui="progress-fill"].ok { background: var(--ok-text); }
+
+:root body #app [data-ui="job-meta"] {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 16px;
+  width: 100%;
+  justify-content: start;
+  align-items: baseline;
+  color: color-mix(in srgb, var(--text) 65%, var(--bg));
+  font-size: 12px;
+}
+:root body #app [data-ui="job-meta"] .pct {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -1px;
+}
+:root body #app [data-ui="job-meta"] .bytes { grid-column: 2; grid-row: 1; margin: 0; text-align: right; }
+:root body #app [data-ui="job-meta"] .times { grid-column: 1; grid-row: 2; }
+:root body #app [data-ui="job-meta"] .speed { grid-column: 2; grid-row: 2; text-align: right; }
+:root body #app [data-ui="job-meta"] .failed { grid-column: 2; grid-row: 3; text-align: right; }
+
+:root body #app [data-ui="job-log"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: color-mix(in srgb, var(--text) 70%, var(--bg));
+  font-size: 12px;
+  line-height: 1.7;
+}
+:root body #app [data-ui="job-options"] {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 12px;
+}
+:root body #app [data-ui="job-actions"] {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+:root body #app [data-ui="job-actions"] button {
+  min-height: 34px;
+  padding: 7px 16px;
+  border-radius: 7px;
+  font-family: inherit;
+}
+:root body #app [data-ui="job-actions"] button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+:root body #app [data-ui="job-actions"] button:hover:not(:disabled) { filter: brightness(.96); }
+@media (prefers-reduced-motion: reduce) {
+  :root body #app [data-ui="job-view"] [data-ui="progress-fill"] { transition: none; }
 }

@@ -73,3 +73,26 @@ export function missingLines(tr, missing, total) {
   }
   return lines;
 }
+
+/**
+ * 빠진 항목 → 작업 로그 줄, 항목마다 "<라벨>: <경로> — <사유> (원문)"
+ * 상한을 넘은 나머지는 마지막 한 줄로, 문장 조립은 missingLines 와 같은 자리
+ * @param {(k:string,p?:object)=>string} tr 번역 함수
+ * @param {Array<{path:string,reason:string,detail?:string}>} missing 빠진 항목(상한만큼)
+ * @param {number} total 자르기 전 개수
+ * @param {string} label 앞머리(log.compressFailed, log.extractFailed 번역문)
+ * @returns {string[]}
+ */
+export function missingLogLines(tr, missing, total, label) {
+  const items = Array.isArray(missing) ? missing : [];
+  const count = typeof total === "number" && total > items.length ? total : items.length;
+  if (count === 0) return [];
+  const lines = items.map((m) => {
+    const detail = m && m.detail ? ` (${m.detail})` : "";
+    return `${label}: ${m.path} — ${tr(`missing.${m.reason}`)}${detail}`;
+  });
+  if (count > items.length) {
+    lines.push(tr("missing.more", { count: count - items.length }));
+  }
+  return lines;
+}

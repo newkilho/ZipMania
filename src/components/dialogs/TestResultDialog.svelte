@@ -31,7 +31,7 @@
   <div class="overlay" data-ui="test-result-dialog" on:click={closeTest}>
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
     <div class="card" data-ui="dialog-card" on:click|stopPropagation on:keydown={onKeydown}>
-      <div class="head">
+      <div class="head" data-ui="dialog-head">
         <h2>
           {$t("test.title")}
           {#if done}
@@ -63,9 +63,10 @@
       </p>
 
       <!-- 진행률 바(초록, 오류 시 빨강) -->
-      <div class="bar">
+      <div class="bar" data-ui="progress-bar">
         <div
           class="fill"
+          data-ui="progress-fill"
           class:err={done && verdict === "error"}
           class:warn={done && verdict === "empty"}
           style="width: {done ? 100 : $testState.percent}%"
@@ -77,7 +78,7 @@
         <div class="cur" title={$testState.currentFile}>{$testState.currentFile || ""}</div>
       {:else if !$testState.error}
         <!-- 완료: 파일별 결과 표 -->
-        <div class="table-wrap">
+        <div class="table-wrap" data-ui="result-table">
           <table>
             <thead>
               <tr>
@@ -102,7 +103,7 @@
       {/if}
 
       <!-- 하단: 요약 + 확인 -->
-      <div class="foot">
+      <div class="foot" data-ui="dialog-foot">
         <div class="summary">
           <span class="chip">{$t("test.sumTotal", { count: total })}</span>
           <span class="chip ok">{$t("test.sumOk", { count: okCount })}</span>

@@ -1,6 +1,9 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import App from "./App.svelte";
+  import CompressWindow from "./components/CompressWindow.svelte";
+  import ExtractWindow from "./components/ExtractWindow.svelte";
+  import SettingsWindow from "./components/SettingsWindow.svelte";
   import { applyLanguage } from "./lib/i18n.js";
   import {
     archivePath,
@@ -51,12 +54,41 @@
     else showArchive();
   }
 
+  // 미리보기에서 볼 창, index.html 의 화면 선택이 이 값을 보낸다
+  let screen = "main"; // main | compress | extract | settings
+  let phase = "form"; // form | running | done, 압축 창과 압축 풀기 창에만 해당
+
+  function onPreviewScreen(event) {
+    const d = event.detail || {};
+    if (d.screen) screen = d.screen;
+    if (d.phase) phase = d.phase;
+  }
+
   applyLanguage("ko");
   if (new URLSearchParams(location.search).get("mode") === "empty") showEmpty();
   else showArchive();
 
-  onMount(() => window.addEventListener("zipmania-preview-mode", onPreviewMode));
-  onDestroy(() => window.removeEventListener("zipmania-preview-mode", onPreviewMode));
+  onMount(() => {
+    window.addEventListener("zipmania-preview-mode", onPreviewMode);
+    window.addEventListener("zipmania-preview-screen", onPreviewScreen);
+  });
+  onDestroy(() => {
+    window.removeEventListener("zipmania-preview-mode", onPreviewMode);
+    window.removeEventListener("zipmania-preview-screen", onPreviewScreen);
+  });
 </script>
 
-<App preview />
+<!-- 단계 전환은 remount 로 한다, 표본은 onMount 에서 한 번만 심는다 -->
+{#if screen === "compress"}
+  {#key phase}
+    <CompressWindow preview previewPhase={phase} />
+  {/key}
+{:else if screen === "extract"}
+  {#key phase}
+    <ExtractWindow preview previewPhase={phase} />
+  {/key}
+{:else if screen === "settings"}
+  <SettingsWindow preview />
+{:else}
+  <App preview />
+{/if}

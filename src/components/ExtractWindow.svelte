@@ -4,7 +4,7 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { get } from "svelte/store";
   import { t, errText } from "../lib/i18n.js";
-  import { missingLines } from "../lib/format.js";
+  import { missingLogLines } from "../lib/format.js";
   import { newMeter, sample } from "../lib/progress.js";
   import JobView from "./JobView.svelte";
   import FolderPicker from "./FolderPicker.svelte";
@@ -15,7 +15,6 @@
     cancelJob,
     deleteFile,
     openFolder,
-    createDirectory,
     onJobProgress,
     onJobDone,
     onJobError,
@@ -27,6 +26,24 @@
     saveSettings,
     emitSettingsChanged,
   } from "../lib/api.js";
+
+  // 스킨 미리보기 전용 — 백엔드 미호출, 표본 상태로 렌더, 실제 창은 기본값 그대로
+  export let preview = false;
+  /** @type {"form"|"running"|"done"} */
+  export let previewPhase = "form";
+  const PREVIEW_ROOTS = [
+    { name: "로컬 디스크 (C:)", path: "C:\\", hasChildren: true },
+    { name: "작업 디스크 (D:)", path: "D:\\", hasChildren: true },
+  ];
+  const PREVIEW_QUICK = [
+    { kind: "desktop", name: "Desktop", path: "C:\\Users\\user\\Desktop" },
+    { kind: "downloads", name: "Downloads", path: "C:\\Users\\user\\Downloads" },
+    { kind: "documents", name: "Documents", path: "C:\\Users\\user\\Documents" },
+    { kind: "pictures", name: "Pictures", path: "C:\\Users\\user\\Pictures" },
+    { kind: "music", name: "Music", path: "C:\\Users\\user\\Music" },
+    { kind: "drive", name: "로컬 디스크 (C:)", path: "C:\\" },
+    { kind: "drive", name: "작업 디스크 (D:)", path: "D:\\" },
+  ];
 
   // ── 컨텍스트/입력 상태 ────────────────────────────────────
   let archive = ""; // 풀 대상 아카이브 경로
@@ -48,13 +65,8 @@
   let finishing = false;
   let initialDest = ""; // 폴더 브라우저가 마운트 시 드러낼 초기 경로
   let autoMode = false; // 빠른 해제 = 폼 생략 후 해제 과정부터 표시
-  let folderPicker; // FolderPicker 인스턴스(새 폴더 생성 후 revealTo 호출용)
 
   // 새 폴더 인라인 입력 상태('압축 풀 파일' 라인 우측)
-  let newFolderMode = false;
-  let newFolderName = "";
-  let creatingFolder = false;
-  let newFolderError = "";
 
   let scope = "all"; // 'all' | 'selected'
   let createSubfolder = true; // 대상 폴더 하위에 '압축파일명' 폴더 생성
@@ -76,9 +88,11 @@
   let starting = false;
   let startError = "";
 
-  // 진행/완료 로그 및 시간
-  // 빠진 항목, 건너뛴 항목 안내 — 로그 대신 결과 화면에만, 배치는 항목 넘어가도 누적
-  let missingShown = [];
+  // 작업 로그 — 쌓이는 줄(요약, 배치 항목, 실패, 안내)과 실패 개수, 배치에서도 누적
+  let jobLog = [];
+  let failedCount = 0;
+  /** 로그 줄 상한 */
+  const LOG_CAP = 200;
   // 처리량/속도 — done, total 은 백엔드가 주는 바이트(0 = 미상)
   let jobDone = 0;
   let jobTotal = 0;
@@ -109,8 +123,8 @@
   let centeredOnce = false; // 창 중앙 정렬을 1회만 하기 위한 플래그
 
   // 폼/진행 화면 창 크기, 폼 값 = Rust open_extract_window 의 inner_size 와 동일 필요
-  const FORM_SIZE = [640, 600];
-  const JOB_SIZE = [520, 340];
+  const FORM_SIZE = [760, 600];
+  const JOB_SIZE = [480, 440];
   let unlistenJobs = [];
 
   // jobId 배정 전 도착한 이벤트 버퍼, 즉시 실패 시 job:error 가 jobId 대입보다 선행
@@ -144,6 +158,10 @@
   $: setCurrentWindowTitle($t("extract.windowTitle")).catch(() => {});
 
   onMount(async () => {
+    if (preview) {
+      seedPreview();
+      return;
+    }
 
     // 리스너를 회수보다 먼저 단다(loadContext 는 IPC 여러 왕복), 표시만 남기고 처리는 언제나 아래 $:
     // 컴포넌트의 ready 와 다른 값(그쪽은 폴더 브라우저 준비)
@@ -214,7 +232,7 @@
         runBatchItem();
       } else {
         phase = "done";
-        jobResult = { status: "warning", message: "" };
+        jobResult = { status: "warning", message: get(t)("extract.doneEnd") };
       }
       return;
     }
@@ -378,6 +396,31 @@
     return i >= 0 ? s.slice(i + 1) : s;
   }
 
+  /** 스킨 미리보기 표본 — 대상 폴더, 범위, 진행/결과를 채운다(previewPhase 별 remount 전제) */
+  function seedPreview() {
+    archive = "D:\\Work\\photos.zip";
+    selectedInner = ["IMG_0421.jpg", "IMG_0422.jpg"];
+    dest = "D:\\Work";
+    initialDest = "D:\\Work";
+    ready = true;
+    autoClose = true;
+    phase = previewPhase;
+    if (phase === "running") {
+      jobPercent = 41;
+      jobFile = "IMG_0428.jpg";
+      jobDone = 188743680;
+      jobTotal = 461373440;
+      meter = { bps: 12582912, startMs: Date.now() - 9000 };
+      elapsedSec = 9;
+    } else if (phase === "done") {
+      jobPercent = 100;
+      jobDone = 461373440;
+      jobTotal = 461373440;
+      jobResult = { status: "ok", message: get(t)("extract.doneOk") };
+      elapsedSec = 17;
+    }
+  }
+
   onDestroy(() => {
     stopTicker();
     for (const off of unlistenJobs) off && off();
@@ -426,38 +469,6 @@
     return scope === "selected" ? selectedInner : [];
   }
 
-  // ── 새 폴더('압축 풀 파일' 라인 우측) ─────────────────────
-  function startNewFolder() {
-    if (!dest) return;
-    newFolderError = "";
-    newFolderName = "";
-    newFolderMode = true;
-    tick().then(() => document.getElementById("new-folder-input")?.focus());
-  }
-
-  function cancelNewFolder() {
-    newFolderMode = false;
-    newFolderName = "";
-  }
-
-  async function confirmNewFolder() {
-    const name = newFolderName.trim();
-    if (!name || creatingFolder) return;
-    creatingFolder = true;
-    newFolderError = "";
-    try {
-      const created = await createDirectory(dest, name);
-      newFolderMode = false;
-      newFolderName = "";
-      // 만든 폴더를 선택 + 트리에 드러낸다
-      if (folderPicker) folderPicker.revealTo(created);
-      else dest = created;
-    } catch (err) {
-      newFolderError = (err && err.message) || String(err);
-    } finally {
-      creatingFolder = false;
-    }
-  }
 
   /**
    * 충돌 검사 후 겹치면 확인 창, 없으면 즉시 시작, 폼/빠른 해제/배치 모두 경유
@@ -520,7 +531,7 @@
             return;
           }
           phase = "done";
-          jobResult = { status: "warning", message: "" };
+          jobResult = { status: "warning", message: get(t)("extract.doneEnd") };
           return;
         }
         phase = "done";
@@ -577,7 +588,7 @@
       if (autoMode) {
         // 빠른 해제는 폼 부재 — 사용자 취소이므로 아무 동작 없이 마감
         phase = "done";
-        jobResult = { status: "canceled", message: "" };
+        jobResult = { status: "canceled", message: get(t)("extract.doneCanceled") };
       }
       return;
     }
@@ -588,7 +599,7 @@
       runBatchItem();
     } else {
       phase = "done";
-      jobResult = { status: "warning", message: "" };
+      jobResult = { status: "warning", message: get(t)("extract.doneEnd") };
     }
   }
 
@@ -662,16 +673,17 @@
         return;
       }
       phase = "done";
-      jobResult = { status: "warning", message: "" };
+      jobResult = { status: "warning", message: get(t)("extract.doneEnd") };
       return;
     }
     phase = "done";
-    jobResult = { status: "canceled", message: "" };
+    jobResult = { status: "canceled", message: get(t)("extract.doneCanceled") };
   }
 
-  /** 결과 화면에 남길 안내 한 줄(빠진 항목, 건너뛴 항목) */
-  function note(line) {
-    missingShown = [...missingShown, line];
+  /** 로그 한 줄 추가(안내, 실패), 상한을 넘으면 앞에서 버린다 */
+  function note(...lines) {
+    const next = [...jobLog, ...lines];
+    jobLog = next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
   }
 
   /** 진행 표시 초기화(다음 작업 준비) */
@@ -681,7 +693,8 @@
     jobDone = 0;
     jobTotal = 0;
     elapsedSec = 0;
-    missingShown = [];
+    jobLog = [];
+    failedCount = 0;
   }
 
   /** 이 작업의 시계 시작 */
@@ -699,6 +712,16 @@
       ticker = null;
     }
   }
+
+  // 로그 마지막 줄 — 진행은 처리 중 파일, 완료는 대상 폴더(취소, 오류는 비운다)
+  $: currentLine =
+    phase === "done"
+      ? jobResult && (jobResult.status === "ok" || jobResult.status === "warning")
+        ? `${$t("log.extractDone")}: ${finalDest}`
+        : ""
+      : jobFile
+        ? `${$t("progress.extracting")}: ${jobFile}`
+        : "";
 
   /** job:progress 의 바이트 반영 — 속도는 표본 간격을 두고 갱신 */
   function onProgressBytes(ev) {
@@ -727,14 +750,20 @@
   /** @param {{status:string, missing?:Array, missingTotal?:number}} ev job:done 페이로드 */
   async function finishJob(ev) {
     const status = ev.status;
-    // 빠진 항목 = 사실 목록, 문장 조립은 missingLines 한 곳
-    const missing = missingLines(get(t), ev.missing, ev.missingTotal);
+    // 빠진 항목 = 사실 목록, 문장 조립은 missingLogLines 한 곳
+    const missing = missingLogLines(
+      get(t),
+      ev.missing,
+      ev.missingTotal,
+      get(t)("log.extractFailed"),
+    );
+    const missingCount = ev.missingTotal || (ev.missing ? ev.missing.length : 0);
     // 배치("각각 풀기"): 이 항목 마감 후 다음 항목으로 넘어가거나, 마지막이면 종료
     if (batchMode) {
       // 취소 = 배치 전체의 취소, 계속 풀면 멈추라고 한 일이 끝까지 진행
       if (status === "canceled") {
         phase = "done";
-        jobResult = { status: "canceled", message: "" };
+        jobResult = { status: "canceled", message: get(t)("extract.doneCanceled") };
         return;
       }
       // 삭제는 ok 일 때만, warning = 빠진 항목 존재
@@ -747,7 +776,8 @@
       }
       if (status !== "ok") {
         batchIssue = true;
-        missingShown = [...missingShown, ...missing];
+        note(...missing);
+        failedCount += missingCount;
       }
       if (batchIndex < batchItems.length - 1) {
         batchIndex++;
@@ -769,14 +799,15 @@
 
     const tr = get(t);
     // 빠진 항목은 이벤트에만 존재, 삼키면 사용자 확인 불가
-    missingShown = [...missingShown, ...missing];
+    note(...missing);
+    failedCount += missingCount;
 
     // "압축 파일 삭제" 옵션 — ok 일 때만(warning 은 일부 항목이 빠진 상태다)
     if (status === "ok" && deleteAfter) {
       try {
         await deleteFile(archive);
       } catch (err) {
-        missingShown = [...missingShown, tr("extract.logDeleteFailed") + ((err && err.message) || err)];
+        note(tr("extract.logDeleteFailed") + ((err && err.message) || err));
       }
     }
 
@@ -854,14 +885,19 @@
   <!-- 본문: 설정 폼 또는 진행 화면. 대화상자는 아래에서 위에 덮어 띄운다. -->
   {#if phase === "form"}
       <!-- 옵션 화면 -->
-      <div class="pad body">
+      <div class="pad body" data-ui="extract-body">
         <!-- 대상 폴더: 인라인 폴더 브라우저(주소줄 + 빠른위치 + 트리 + 새 폴더) -->
         {#if ready}
-          <FolderPicker bind:this={folderPicker} bind:path={dest} initialPath={initialDest} />
+          <FolderPicker
+            bind:path={dest}
+            initialPath={initialDest}
+            previewRoots={preview ? PREVIEW_ROOTS : null}
+            previewQuick={preview ? PREVIEW_QUICK : null}
+          />
         {/if}
 
         <!-- 범위 + (우측) 새 폴더 -->
-        <fieldset class="row rad">
+        <fieldset class="row rad" data-ui="extract-scope">
           <span class="lb">{$t("extract.scopeLabel")}</span>
           <label class="radio">
             <input type="radio" bind:group={scope} value="all" /> {$t("extract.scopeAll")}
@@ -870,25 +906,7 @@
             <input type="radio" bind:group={scope} value="selected" disabled={selectedCount === 0} />
             {$t("extract.scopeSelected")}{selectedCount > 0 ? " " + $t("common.countParen", { count: selectedCount }) : ""}
           </label>
-          <div class="spacer"></div>
-          {#if newFolderMode}
-            <input
-              id="new-folder-input"
-              class="nf-input"
-              type="text"
-              bind:value={newFolderName}
-              placeholder={$t("folderPicker.newFolderName")}
-              on:keydown={(e) => (e.key === "Enter" ? confirmNewFolder() : e.key === "Escape" ? cancelNewFolder() : null)}
-            />
-            <button class="ghost small" on:click={confirmNewFolder} disabled={!newFolderName.trim() || creatingFolder}>{$t("common.confirm")}</button>
-            <button class="ghost small" on:click={cancelNewFolder}>{$t("common.cancel")}</button>
-          {:else}
-            <button class="ghost small" on:click={startNewFolder} disabled={!dest}>{$t("folderPicker.newFolder")}</button>
-          {/if}
         </fieldset>
-        {#if newFolderError}
-          <div class="nf-error" role="alert">⚠ {newFolderError}</div>
-        {/if}
 
         <!-- 옵션 체크박스 -->
         <label class="check">
@@ -903,11 +921,11 @@
       </div>
 
       {#if startError}
-        <div class="start-error" role="alert">⚠ {startError}</div>
+        <div class="start-error" role="alert" data-ui="form-error">⚠ {startError}</div>
       {/if}
 
       <!-- 하단 액션 -->
-      <div class="actions">
+      <div class="actions" data-ui="window-actions">
         <div class="spacer"></div>
         <button class="ghost" on:click={onClose}>{$t("common.cancel")}</button>
         <button class="primary" on:click={onConfirm} disabled={!finalDest || checking || starting}>
@@ -924,28 +942,29 @@
       total={jobTotal}
       {meter}
       {elapsedSec}
-      file={jobFile}
+      log={jobLog}
+      current={currentLine}
+      failed={failedCount}
       result={jobResult}
-      missing={missingShown}
     >
       <svelte:fragment slot="notice">
-        {#if startError}<div class="start-error" role="alert">⚠ {startError}</div>{/if}
+        {#if startError}<div class="start-error" role="alert" data-ui="form-error">⚠ {startError}</div>{/if}
       </svelte:fragment>
-      <div slot="options" class="opts">
+      <div slot="options" class="opts" data-ui="job-options">
         <label class="check sm">
           <input type="checkbox" bind:checked={autoClose} on:change={persistAfterOptions} />
-          {$t("extract.optClose")}
+          {$t("common.closeWindow")}
         </label>
         <label class="check sm">
           <input type="checkbox" bind:checked={openFolderAfter} on:change={persistAfterOptions} />
-          {$t("extract.openDestFolder")}
+          {$t("common.openFolder")}
         </label>
       </div>
       <svelte:fragment slot="actions">
         {#if phase === "running"}
           <button class="ghost" on:click={onCancelJob}>{$t("common.cancel")}</button>
         {:else}
-          <button class="ghost" on:click={onOpenDest}>{$t("extract.openDestFolder")}</button>
+          <button class="ghost" on:click={onOpenDest}>{$t("common.openFolder")}</button>
           <button class="primary" on:click={onClose}>{$t("common.close")}</button>
         {/if}
       </svelte:fragment>
@@ -957,9 +976,9 @@
     갈아끼우면 DOM 이 통째로 교체되면서 화면이 한 번 깜빡인다.
   -->
   {#if needPassword}
-    <div class="overlay">
+    <div class="overlay" data-ui="overlay">
     <!-- 암호 입력 — 진행 화면 위에 뜬다(폼으로 되돌아가지 않는다) -->
-    <div class="pad conflict-pad">
+    <div class="pad conflict-pad" data-ui="extract-password">
       <h2>{$t("common.password")}</h2>
       <p class="conflict-file" title={archive}>{fileNameOf(archive)}</p>
       <p class="desc">{$t("extract.passwordAsk")}</p>
@@ -976,7 +995,7 @@
         {#if passwordError}<p class="warn-text">{passwordError}</p>{/if}
       </div>
 
-      <div class="actions">
+      <div class="actions" data-ui="dialog-actions">
         <div class="spacer"></div>
         <button class="primary" on:click={onSubmitPassword} disabled={!password}>
           {$t("common.confirm")}
@@ -986,9 +1005,9 @@
     </div>
     </div>
   {:else if showConflict}
-    <div class="overlay">
+    <div class="overlay" data-ui="overlay">
     <!-- 충돌 확인 — 파일 하나씩 묻는다(진행 중에도 이 화면이 앞에 온다). -->
-    <div class="pad conflict-pad">
+    <div class="pad conflict-pad" data-ui="extract-conflict">
       <h2>{$t("extract.conflictTitle")}</h2>
       <p class="conflict-file" title={conflicts[conflictIndex]}>
         {$t("extract.conflictExists", { name: conflicts[conflictIndex] ?? "" })}
@@ -1010,7 +1029,7 @@
         </label>
       </div>
 
-      <div class="actions">
+      <div class="actions" data-ui="dialog-actions">
         <div class="spacer"></div>
         <button class="primary" on:click={confirmConflictChoice}>{$t("common.confirm")}</button>
         <button class="ghost" on:click={cancelConflict}>{$t("common.cancel")}</button>
@@ -1177,23 +1196,6 @@
   button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-  button.small {
-    padding: 5px 10px;  }
-  .nf-input {
-    flex: 0 1 180px;
-    min-width: 0;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--btn-bg);
-    color: var(--text);  }
-  .nf-error {
-    color: var(--alert-text, #9b1c1c);
-    padding-left: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .ghost {
     background: var(--btn-bg);

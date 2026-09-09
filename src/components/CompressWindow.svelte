@@ -23,18 +23,27 @@
     onJobDone,
     onJobError,
     closeCurrentWindow,
+    openFolder,
+    getSettings,
+    saveSettings,
+    emitSettingsChanged,
     resizeCurrentWindow,
     setCurrentWindowTitle,
   } from "../lib/api.js";
-  import { formatSize, missingLines } from "../lib/format.js";
+  import { formatSize, missingLines, missingLogLines } from "../lib/format.js";
   import { newMeter, sample } from "../lib/progress.js";
   import JobView from "./JobView.svelte";
   import { FORM_DEFAULTS, isFormDirty, batchIssueAfter, runPlan } from "../lib/compressPlan.js";
   import { createCoordinator } from "../lib/compressCoordinator.js";
 
+  // 스킨 미리보기 전용 — 백엔드 미호출, 표본 상태로 렌더, 실제 창은 기본값 그대로
+  export let preview = false;
+  /** @type {"form"|"running"|"done"} */
+  export let previewPhase = "form";
+
   // 폼/진행 화면 창 크기, 폼 값 = Rust open_compress_window 의 inner_size 와 동일 필요
   const FORM_SIZE = [680, 620];
-  const JOB_SIZE = [520, 340];
+  const JOB_SIZE = [480, 440];
 
   // 포맷별 확장자
   const FORMAT_EXT = { "7z": "7z", zip: "zip", tar: "tar" };
@@ -55,6 +64,13 @@
   let password = "";
   let encryptNames = false;
   let outputSuggested = false; // 출력 경로 자동 제안을 1회만 하기 위한 플래그
+
+  // 완료 후 동작 — 해제 창과 같은 두 가지, 설정에 기억
+  let autoClose = false;
+  let openFolderAfter = false;
+  let loadedSettings = null;
+  let doneTarget = ""; // 방금 만든 아카이브 경로, 완료 화면 경로 줄
+  let doneFolder = ""; // 그 아카이브가 있는 폴더, [폴더 열기] 대상
 
   // "각각 압축" 배치: 각 원본을 자기 이름의 아카이브로 순차 압축
   let batchMode = false;
@@ -81,8 +97,17 @@
   let meter = null;
   let elapsedSec = 0;
   let ticker = null;
-  // 빠진 항목(경고) 상세 — 결과 화면에서만 표시
-  let missingShown = [];
+  /** 로그 줄 상한 */
+  const LOG_CAP = 200;
+  // 작업 로그 — 쌓이는 줄(요약, 배치 항목, 실패)과 실패 개수, 진행/완료 화면 공용
+  let jobLog = [];
+  let failedCount = 0;
+
+  /** 로그 줄 추가, 상한을 넘으면 앞에서 버린다 */
+  function pushLog(...lines) {
+    const next = [...jobLog, ...lines];
+    jobLog = next.length > LOG_CAP ? next.slice(-LOG_CAP) : next;
+  }
 
   /** 진행 시계 시작 — 경과 시간은 이벤트가 아니라 시계가 갱신 */
   function startTicker() {
@@ -105,7 +130,6 @@
     jobDone = 0;
     jobTotal = 0;
     elapsedSec = 0;
-    missingShown = [];
   }
 
   /** 이 작업의 시계 시작 */
@@ -192,6 +216,10 @@
   $: setCurrentWindowTitle($t("compress.windowTitle")).catch(() => {});
 
   onMount(async () => {
+    if (preview) {
+      seedPreview();
+      return;
+    }
     // 리스너를 회수보다 먼저 단다(회수는 IPC 왕복), 초기화 전이므로 기억만 해 둔다
     unlistenAdd = await onCompressTakeInputs(() => {
       coord.signal();
@@ -207,6 +235,15 @@
     const offD = await onJobDone((d) => dispatch("done", d));
     const offE = await onJobError((e) => dispatch("error", e));
     unlistenJobs = [offP, offD, offE];
+
+    // 완료 후 동작은 모든 경로(폼, 즉시 압축, 배치)에 적용, 회수보다 앞
+    try {
+      loadedSettings = await getSettings();
+      autoClose = loadedSettings.compress_auto_close ?? false;
+      openFolderAfter = loadedSettings.compress_open_folder ?? false;
+    } catch {
+      /* 설정 실패는 치명적이지 않다(하드코딩 기본값 유지), */
+    }
 
     // 새 창 표시 시 보관 요청 회수 후 적용(배치/자동 모드면 여기서 시작)
     try {
@@ -226,6 +263,8 @@
     jobResult = null;
     jobPercent = 0;
     jobFile = "";
+    jobLog = [];
+    failedCount = 0;
     resetProgress();
     jobId = null;
     startError = "";
@@ -315,9 +354,10 @@
   }
 
   /** 작업 완료 처리, */
-  function onJobFinished(d) {
+  async function onJobFinished(d) {
     // 빠진 항목은 마지막 작업 것만 두지 않고 쌓는다(배치에서 앞 항목이 묻힌다)
-    missingShown = [...missingShown, ...missingLines(get(t), d.missing, d.missingTotal)];
+    pushLog(...missingLogLines(get(t), d.missing, d.missingTotal, get(t)("log.compressFailed")));
+    failedCount += d.missingTotal || (d.missing ? d.missing.length : 0);
     // 배치("각각 압축"): 다음 원본으로 넘어가거나, 마지막이면 완료
     if (batchMode && d.status !== "canceled") {
         // ok 아닌 것은 전부 흠집, warning 을 세지 않으면 마지막 항목의 성공이 덮는다
@@ -335,6 +375,7 @@
         status: batchIssue ? "warning" : "ok",
         message: get(t)("compress.doneOk"),
       };
+      await afterDone(!batchIssue);
       return;
     }
     phase = "done";
@@ -349,6 +390,14 @@
         ? tr("compress.doneCanceled")
         : missing[0] || tr("compress.doneOk");
     jobResult = { status: d.status, message: msg };
+    await afterDone(d.status === "ok");
+  }
+
+  /** 완료 후 동작 처리 — 성공일 때만, 미뤄 둔 요청이 자동 닫기보다 먼저다 */
+  async function afterDone(ok) {
+    if (!ok) return;
+    if (openFolderAfter) await onOpenOut();
+    if (autoClose && !taking) await onCancel();
   }
 
   /** 작업 실패 처리, */
@@ -388,8 +437,13 @@
         encryptNames: supportsEncryptNames && encryptNames,
       });
       jobId = id;
+      doneTarget = item.output;
+      doneFolder = parentDirOf(item.output);
       jobPercent = 0;
       jobFile = fileNameOf(item.input);
+      pushLog(
+        `${get(t)("progress.batchItem", { index: batchIndex + 1, count: batchItems.length })} ${fileNameOf(item.output)}`,
+      );
       resetProgress();
       startProgress();
       jobResult = null;
@@ -412,11 +466,86 @@
     }
   }
 
+  /** 경로에서 상위 폴더만, 구분자가 없으면 빈 문자열 */
+  function parentDirOf(p) {
+    const s = String(p ?? "");
+    const i = Math.max(s.lastIndexOf("\\"), s.lastIndexOf("/"));
+    return i > 0 ? s.slice(0, i) : "";
+  }
+
+  /** 완료 후 동작 체크박스를 설정에 저장 — 소급 없음, 다음 압축부터 적용 */
+  async function persistAfterOptions() {
+    if (!loadedSettings) return;
+    try {
+      // 저장 직전 파일 재읽기 후 병합, 재읽기 실패 시 저장 안 함
+      const next = {
+        ...(await getSettings()),
+        compress_auto_close: autoClose,
+        compress_open_folder: openFolderAfter,
+      };
+      await saveSettings(next);
+      // 저장 성공 시 방송 — 다른 창이 반영하는 유일한 경로
+      await emitSettingsChanged(next);
+      loadedSettings = next;
+    } catch (err) {
+      console.error("완료 후 동작 저장 실패:", err);
+    }
+  }
+
+  /** 완료 화면 [폴더 열기] — 만든 아카이브가 있는 폴더 */
+  async function onOpenOut() {
+    if (!doneFolder) return;
+    try {
+      await openFolder(doneFolder);
+    } catch (err) {
+      console.error("폴더 열기 실패:", err);
+    }
+  }
+
   /** 경로에서 파일명만, */
   function fileNameOf(p) {
     const s = String(p ?? "");
     const i = Math.max(s.lastIndexOf("\\"), s.lastIndexOf("/"));
     return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  /** 스킨 미리보기 표본 — 목록, 출력, 진행/결과를 채운다(previewPhase 별 remount 전제) */
+  function seedPreview() {
+    inputs = ["D:\\Work\\Documents", "D:\\Work\\README.txt", "D:\\Work\\setup.exe"];
+    statMap = {
+      "D:\\Work\\Documents": { path: "D:\\Work\\Documents", size: 0, isDir: true },
+      "D:\\Work\\README.txt": { path: "D:\\Work\\README.txt", size: 12288, isDir: false },
+      "D:\\Work\\setup.exe": { path: "D:\\Work\\setup.exe", size: 2516582, isDir: false },
+    };
+    folderFiles = {
+      "D:\\Work\\Documents": [
+        { rel: "Project\\plan.docx", size: 48128 },
+        { rel: "Project\\budget.xlsx", size: 20480 },
+        { rel: "notes.txt", size: 1024 },
+      ],
+    };
+    output = "D:\\Work\\Documents.zip";
+    doneTarget = output;
+    outputSuggested = true;
+    phase = previewPhase;
+    if (phase === "running") {
+      jobPercent = 62;
+      jobFile = "D:\\Work\\Documents\\Project\\plan.docx";
+      jobDone = 166723584;
+      jobTotal = 268435456;
+      meter = { bps: 8650752, startMs: Date.now() - 14000 };
+      elapsedSec = 14;
+    } else if (phase === "done") {
+      jobPercent = 100;
+      jobDone = 268435456;
+      jobTotal = 268435456;
+      jobResult = { status: "warning", message: get(t)("compress.doneOk") };
+      jobLog = [
+        `${get(t)("log.compressFailed")}: D:\\Work\\server.log — ${get(t)("missing.read")} (os error 32)`,
+      ];
+      failedCount = 1;
+      elapsedSec = 23;
+    }
   }
 
   onDestroy(() => {
@@ -433,7 +562,17 @@
   }
 
   // 입력 목록 변경 시 크기/폴더 여부 재조회
-  $: refreshStats(inputs);
+  // 로그 마지막 줄 — 진행은 처리 중 파일, 완료는 만든 아카이브(취소, 오류는 비운다)
+  $: currentLine =
+    phase === "done"
+      ? jobResult && (jobResult.status === "ok" || jobResult.status === "warning")
+        ? `${$t("log.compressDone")}: ${doneTarget}`
+        : ""
+      : jobFile
+        ? `${$t("progress.compressing")}: ${jobFile}`
+        : "";
+
+  $: if (!preview) refreshStats(inputs);
 
   // 포맷 특성
   $: supportsPassword = format !== "tar";
@@ -554,7 +693,7 @@
   }
 
   // 입력이 바뀌면 내부 파일 목록도 갱신
-  $: refreshFolderFiles(inputs);
+  $: if (!preview) refreshFolderFiles(inputs);
 
   // 표시용 행 목록, inputs, statMap, folderFiles 중 하나라도 바뀌면 재계산
   // 템플릿에서 함수 직접 호출 금지(변화 추적 안 됨), 폴더는 헤더 한 줄로만 표시
@@ -745,6 +884,8 @@
         batchIndex = 0;
         batchIssue = false;
         batchMode = true;
+        jobLog = [];
+        failedCount = 0;
         resizeCurrentWindow(...JOB_SIZE).catch(() => {});
         return await runCompressItem();
       }
@@ -758,10 +899,14 @@
       });
       // 작업이 시작됨 → 진행 화면으로 전환, 진행률/완료는 job 이벤트로 이 창에 표시
       jobId = id;
+      doneTarget = req.output;
+      doneFolder = parentDirOf(req.output);
       // job 등록 순간 starting 해제, 유지 시 busy 가 안 내려가 미뤄 둔 요청 영구 잔존
       starting = false;
       jobPercent = 0;
       jobFile = "";
+      jobLog = [];
+      failedCount = 0;
       resetProgress();
       startProgress();
       jobResult = null;
@@ -800,14 +945,14 @@
 <div class="win" data-ui="compress-window">
   {#if phase === "form"}
   <!-- 본문 2단 -->
-  <div class="body">
+  <div class="body" data-ui="compress-body">
     <!-- ── 좌측 열 ─────────────────────────────── -->
     <div class="col left">
       <!-- 압축할 파일 목록 -->
-      <div class="block list-block">
+      <div class="block list-block" data-ui="compress-list-block">
         <span class="block-title">{$t("compress.listTitle", { count: inputs.length })}</span>
         <div class="list-wrap">
-          <table class="list">
+          <table class="list" data-ui="compress-list">
             <thead>
               <tr>
                 <th class="c-name">{$t("compress.colName")}</th>
@@ -849,7 +994,7 @@
             </tbody>
           </table>
         </div>
-        <div class="list-actions">
+        <div class="list-actions" data-ui="compress-list-actions">
           <button class="ghost small" on:click={onAddFiles}>{$t("compress.addFiles")}</button>
           <button class="ghost small" on:click={onAddFolders}>{$t("compress.addFolders")}</button>
           <button
@@ -863,7 +1008,7 @@
       <hr class="sep" />
 
       <!-- 압축 파일 설정 -->
-      <div class="block">
+      <div class="block" data-ui="compress-options">
         <span class="block-title">{$t("compress.settingsTitle")}</span>
 
         <!-- 파일 이름(출력 경로) — "각각 압축" 이면 항목별로 계산되므로 비활성. -->
@@ -948,11 +1093,11 @@
 
   <!-- 시작 실패 인라인 알림 -->
   {#if startError}
-    <div class="start-error" role="alert">⚠ {startError}</div>
+    <div class="start-error" role="alert" data-ui="form-error">⚠ {startError}</div>
   {/if}
 
   <!-- 하단 액션 바 -->
-  <div class="actions">
+  <div class="actions" data-ui="window-actions">
     {#if !canStart && startHint}
       <span class="hint">{startHint}</span>
     {/if}
@@ -960,10 +1105,10 @@
     <button class="ghost" on:click={onCancel}>{$t("common.cancel")}</button>
     <button class="primary" on:click={() => onStart()} disabled={!canStart}>{$t("compress.start")}</button>
   </div>
-  {:else if phase === "running"}
-    <!-- 진행 화면 -->
+  {:else}
+    <!-- 진행/완료 화면 — 해제 창과 같은 컴포넌트(JobView), 버튼만 다르다 -->
     <JobView
-      phase="running"
+      {phase}
       title={$t("compress.running")}
       badge={batchMode ? $t("progress.batchItem", { index: batchIndex + 1, count: batchItems.length }) : ""}
       percent={jobPercent}
@@ -971,15 +1116,29 @@
       total={jobTotal}
       {meter}
       {elapsedSec}
-      file={jobFile}
-      missing={missingShown}
+      log={jobLog}
+      current={currentLine}
+      failed={failedCount}
+      result={jobResult}
     >
-      <button slot="actions" class="ghost" on:click={onCancelJob}>{$t("common.cancel")}</button>
-    </JobView>
-  {:else}
-    <!-- 완료/실패 화면 -->
-    <JobView phase="done" result={jobResult} {elapsedSec} missing={missingShown}>
-      <button slot="actions" class="primary" on:click={onCancel}>{$t("common.close")}</button>
+      <div slot="options" class="opts" data-ui="job-options">
+        <label class="check sm">
+          <input type="checkbox" bind:checked={autoClose} on:change={persistAfterOptions} />
+          {$t("common.closeWindow")}
+        </label>
+        <label class="check sm">
+          <input type="checkbox" bind:checked={openFolderAfter} on:change={persistAfterOptions} />
+          {$t("common.openFolder")}
+        </label>
+      </div>
+      <svelte:fragment slot="actions">
+        {#if phase === "running"}
+          <button class="ghost" on:click={onCancelJob}>{$t("common.cancel")}</button>
+        {:else}
+          <button class="ghost" on:click={onOpenOut}>{$t("common.openFolder")}</button>
+          <button class="primary" on:click={onCancel}>{$t("common.close")}</button>
+        {/if}
+      </svelte:fragment>
     </JobView>
   {/if}
 </div>
@@ -1190,6 +1349,14 @@
     font-size: 13px;
     color: var(--text);
     cursor: pointer;
+  }
+  /* 진행 화면 완료 후 동작 — 해제 창과 같은 모양 */
+  .opts {
+    display: flex;
+    gap: 14px;
+  }
+  .check.sm {
+    color: var(--text-muted);
   }
   .p2-checks {
     display: flex;

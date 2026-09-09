@@ -21,8 +21,26 @@ skin/default/
 ## 바로 테스트하기
 
 `skin/default/index.html`을 Chrome에서 직접 엽니다. 개발 서버는 필요하지
-않습니다. 상단에서 `파일 열림`과 `파일 없음`, 시스템·라이트·다크 테마를
-전환할 수 있습니다.
+않습니다. 상단 전환기로 앱의 모든 창을 볼 수 있습니다.
+
+| 전환기 | 값 |
+|---|---|
+| 창 | 메인 · 압축 · 해제 · 설정 |
+| 메인 창 상태 | 열림 · 기본 |
+| 작업 단계 | 옵션 · 진행 · 완료 (압축 창, 해제 창) |
+| 테마 | 시스템 · 라이트 · 다크 |
+
+`작업 단계`의 `진행`과 `완료`는 두 창이 함께 쓰는 화면입니다. 창 크기는 실제 앱과
+같게 자동으로 바뀝니다.
+
+주소로 바로 열 수도 있습니다.
+
+```text
+index.html?screen=compress&phase=running
+index.html?screen=extract&phase=done
+index.html?screen=settings
+index.html?mode=empty
+```
 
 `skin.css` 또는 이미지 파일을 수정한 뒤 Chrome을 새로고침하면
 바로 반영됩니다.
@@ -40,7 +58,7 @@ CSS 또는 이미지 수정 → Chrome 새로고침
 `skin.css`의 변수를 수정합니다.
 
 ```css
-:root[data-skin="default"] {
+:root {
   --bg: #ffffff;
   --surface: #f5f5f7;
   --border: #e0e0e0;
@@ -73,7 +91,7 @@ CSS 또는 이미지 수정 → Chrome 새로고침
 이미지를 `skin/<이름>/images/`에 넣고 `skin.css`에서 연결합니다.
 
 ```css
-:root[data-skin="default"] {
+:root {
   --skin-app-background: url("./images/app.webp");
   --skin-toolbar-background: url("./images/toolbar.png");
   --skin-sidebar-background: none;
@@ -92,10 +110,12 @@ CSS 또는 이미지 수정 → Chrome 새로고침
 ## 새 스킨 만들기
 
 1. `skin/default` 폴더 전체를 `skin/<새 이름>`으로 복사합니다.
-2. `skin.css`의 `data-skin="default"`를 새 이름으로 바꿉니다.
-3. 색상과 배경 이미지를 수정합니다.
-4. 복사한 `index.html`을 Chrome에서 열어 확인합니다.
-5. 실제 앱 배포본은 `npm run build`로 갱신합니다.
+2. 색상과 배경 이미지를 수정합니다.
+3. 복사한 `index.html`을 Chrome에서 열어 확인합니다.
+4. 실제 앱 배포본은 `npm run build`로 갱신합니다.
+
+스킨 이름은 폴더 이름입니다. `skin.css`에는 이름을 적지 않으므로, 폴더를 옮기거나
+이름을 바꿔도 손댈 곳이 없습니다.
 
 앱은 `skin/*/skin.css`를 빌드할 때 자동으로 찾습니다. `skin.css` 파일명은
 변경하면 안 됩니다.
@@ -105,6 +125,7 @@ CSS 또는 이미지 수정 → Chrome 새로고침
 `skin.css`에서 사용할 수 있는 안정적인 선택자는 다음과 같습니다.
 
 ```css
+/* 메인 창 */
 [data-ui="toolbar"]
 [data-ui="app-main"]
 [data-ui="workspace"]
@@ -112,13 +133,68 @@ CSS 또는 이미지 수정 → Chrome 새로고침
 [data-ui="folder-tree"]
 [data-ui="preview-pane"]
 [data-ui="file-table"]
+[data-ui="file-list"]
+[data-ui="breadcrumb"]
+[data-ui="archive-tree-node"]
+[data-ui="directory-tree-node"]
 [data-ui="empty-state"]
-[data-ui="progress-panel"]
 [data-ui="status-bar"]
-[data-ui="dialog-card"]
+[data-ui="assoc-banner"]
+[data-ui="splitter"]
+[data-ui="alert"]
+
+/* 압축 창 */
 [data-ui="compress-window"]
+[data-ui="compress-body"]
+[data-ui="compress-list-block"]
+[data-ui="compress-list"]
+[data-ui="compress-list-actions"]
+[data-ui="compress-options"]
+
+/* 압축 풀기 창 */
 [data-ui="extract-window"]
+[data-ui="extract-body"]
+[data-ui="extract-scope"]
+[data-ui="extract-password"]
+[data-ui="extract-conflict"]
+[data-ui="folder-picker"]
+[data-ui="quick-access"]
+
+/* 진행·결과 화면 (압축 창과 압축 풀기 창 공용) */
+[data-ui="job-view"]
+[data-ui="job-title"]
+[data-ui="job-meta"]
+[data-ui="job-log"]
+[data-ui="job-result"]
+[data-ui="job-options"]
+[data-ui="job-actions"]
+[data-ui="progress-panel"]
+[data-ui="progress-bar"]
+[data-ui="progress-fill"]
+[data-ui="toast-layer"]
+[data-ui="toast"]
+
+/* 대화 상자 */
+[data-ui="overlay"]
+[data-ui="dialog-card"]
+[data-ui="dialog-head"]
+[data-ui="dialog-foot"]
+[data-ui="dialog-actions"]
+[data-ui="password-dialog"]
+[data-ui="scan-result-dialog"]
+[data-ui="test-result-dialog"]
+[data-ui="result-table"]
+
+/* 환경설정 창 */
 [data-ui="settings-window"]
+[data-ui="settings-sidebar"]
+[data-ui="settings-nav"]
+[data-ui="settings-content"]
+[data-ui="settings-actions"]
+
+/* 모든 창 공통 */
+[data-ui="window-actions"]
+[data-ui="form-error"]
 ```
 
 스킨은 외형만 담당합니다. 앱의 요소를 추가·삭제하거나 순서를 바꾸고 기능을

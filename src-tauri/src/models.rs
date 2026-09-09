@@ -144,4 +144,5 @@ pub struct QuickAccess {
     pub kind: String,
     pub name: String,
     pub path: String,
+    pub icon: Option<String>,
 }

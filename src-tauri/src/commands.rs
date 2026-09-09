@@ -15,7 +15,7 @@ use zipmania_archive::{
 use crate::jobs::JobManager;
 use crate::models::{
     CompressBatchItem, CompressLaunch, CompressTake, DirNode, ExtractBatchItem, ExtractContext,
-    FolderFile, JobDone, JobErrorEvent, JobProgress, JobStarted, PathInfo, QuickAccess,
+    FolderFile, JobDone, JobErrorEvent, JobStarted, PathInfo, QuickAccess,
     ScanReportEvent, TestReportEvent,
 };
 use crate::settings::Settings;
@@ -572,18 +572,8 @@ pub fn start_test(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |p: zipmania_archive::Progress| {
-            let _ = app_bg.emit(
-                "job:progress",
-                JobProgress {
-                    job_id: job_for_thread.clone(),
-                    percent: p.percent,
-                    current_file: p.current_file.unwrap_or_default(),
-                    done: p.done,
-                    total: p.total,
-                },
-            );
-        };
+        let mut on_progress =
+            crate::jobs::progress_emitter(app_bg.clone(), job_for_thread.clone());
         let result = router.for_archive(&archive_bg).test_report(
             &archive_bg,
             pw_bg.as_deref(),
@@ -682,18 +672,8 @@ pub fn start_scan(
         };
 
         let router = Router::new(dll);
-        let mut on_progress = |p: zipmania_archive::Progress| {
-            let _ = app_bg.emit(
-                "job:progress",
-                JobProgress {
-                    job_id: job_for_thread.clone(),
-                    percent: p.percent,
-                    current_file: p.current_file.unwrap_or_default(),
-                    done: p.done,
-                    total: p.total,
-                },
-            );
-        };
+        let mut on_progress =
+            crate::jobs::progress_emitter(app_bg.clone(), job_for_thread.clone());
         // 검사 콜백(각 파일 바이트를 AMSI 로 검사)
         let scan: Box<dyn FnMut(&str, &[u8]) -> String + Send> =
             Box::new(move |name, data| session.scan(name, data));
@@ -779,18 +759,8 @@ pub fn start_edit(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |p: zipmania_archive::Progress| {
-            let _ = app_bg.emit(
-                "job:progress",
-                JobProgress {
-                    job_id: job_for_thread.clone(),
-                    percent: p.percent,
-                    current_file: p.current_file.unwrap_or_default(),
-                    done: p.done,
-                    total: p.total,
-                },
-            );
-        };
+        let mut on_progress =
+            crate::jobs::progress_emitter(app_bg.clone(), job_for_thread.clone());
         let opts = EditOptions {
             archive: archive_bg.clone(),
             add,
@@ -900,16 +870,8 @@ pub fn extract(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |p: zipmania_archive::Progress| {
-            let payload = JobProgress {
-                job_id: job_for_thread.clone(),
-                percent: p.percent,
-                current_file: p.current_file.unwrap_or_default(),
-                done: p.done,
-                total: p.total,
-            };
-            let _ = app_bg.emit("job:progress", payload);
-        };
+        let mut on_progress =
+            crate::jobs::progress_emitter(app_bg.clone(), job_for_thread.clone());
         let result = router
             .for_archive(&opts.archive)
             .extract(&opts, &mut on_progress, cancel);
@@ -981,16 +943,8 @@ pub fn create_archive(
     std::thread::spawn(move || {
         let job = job;
         let router = Router::new(dll);
-        let mut on_progress = |p: zipmania_archive::Progress| {
-            let payload = JobProgress {
-                job_id: job_for_thread.clone(),
-                percent: p.percent,
-                current_file: p.current_file.unwrap_or_default(),
-                done: p.done,
-                total: p.total,
-            };
-            let _ = app_bg.emit("job:progress", payload);
-        };
+        let mut on_progress =
+            crate::jobs::progress_emitter(app_bg.clone(), job_for_thread.clone());
         let result = router
             .for_format(&format_str)
             .create(&opts, &mut on_progress, cancel);
@@ -1147,16 +1101,73 @@ pub fn list_dir_children(path: Option<String>) -> Vec<DirNode> {
     }
 }
 
-/// 폴더 브라우저 바로가기, 즐겨찾기 + 드라이브 루트, 라벨 번역은 프런트가 kind 로
+/// 알려진 폴더 실경로(리디렉션 반영), SHGetKnownFolderPath 경유, 실패 = None
+#[cfg(windows)]
+fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+
+    unsafe {
+        let raw = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
+        let text = raw.to_string().ok();
+        CoTaskMemFree(Some(raw.0 as *const std::ffi::c_void));
+        text.map(PathBuf::from)
+    }
+}
+
+/// 바로가기 아이콘 데이터 URI, 특수 폴더의 고유 아이콘 반영, 실패 = None
+fn quick_icon(path: &str) -> Option<String> {
+    use base64::Engine;
+    let png = crate::sysicon::path_icon_png(path)?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+    Some(format!("data:image/png;base64,{b64}"))
+}
+
+/// 폴더 브라우저 바로가기, 알려진 폴더 + 홈 + 드라이브 루트, 라벨 번역은 프런트가 kind 로
 #[tauri::command]
 pub fn list_quick_access() -> Vec<QuickAccess> {
     let mut out = Vec::new();
+
+    // 알려진 폴더(탐색기 좌측 순서), 존재하는 것만
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Shell::{
+            FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music,
+            FOLDERID_Pictures,
+        };
+        for (kind, id) in [
+            ("desktop", &FOLDERID_Desktop),
+            ("downloads", &FOLDERID_Downloads),
+            ("documents", &FOLDERID_Documents),
+            ("pictures", &FOLDERID_Pictures),
+            ("music", &FOLDERID_Music),
+        ] {
+            let Some(p) = known_folder(id) else { continue };
+            if !p.is_dir() {
+                continue;
+            }
+            let path = p.to_string_lossy().into_owned();
+            out.push(QuickAccess {
+                kind: kind.to_string(),
+                name: p
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone()),
+                icon: quick_icon(&path),
+                path,
+            });
+        }
+    }
+
+    // 비-Windows 는 알려진 폴더 API 가 없어 홈 하위 이름으로
+    #[cfg(not(windows))]
     if let Some(home) = home_dir() {
-        // 즐겨찾기(존재하는 것만), 파일시스템 폴더명은 로케일과 무관하게 영어
         for (kind, sub) in [
             ("desktop", "Desktop"),
-            ("documents", "Documents"),
             ("downloads", "Downloads"),
+            ("documents", "Documents"),
+            ("pictures", "Pictures"),
+            ("music", "Music"),
         ] {
             let p = home.join(sub);
             if p.is_dir() {
@@ -1164,24 +1175,18 @@ pub fn list_quick_access() -> Vec<QuickAccess> {
                     kind: kind.to_string(),
                     name: sub.to_string(),
                     path: p.to_string_lossy().into_owned(),
+                    icon: None,
                 });
             }
         }
-        // 홈 폴더 자체
-        out.push(QuickAccess {
-            kind: "home".to_string(),
-            name: home
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| home.to_string_lossy().into_owned()),
-            path: home.to_string_lossy().into_owned(),
-        });
     }
+
     // 드라이브 루트(Windows) / /(기타)
     for d in dir_roots() {
         out.push(QuickAccess {
             kind: "drive".to_string(),
             name: d.name,
+            icon: quick_icon(&d.path),
             path: d.path,
         });
     }
@@ -1275,8 +1280,10 @@ fn dir_roots() -> Vec<DirNode> {
     for c in b'A'..=b'Z' {
         let root = format!("{}:\\", c as char);
         if std::fs::metadata(&root).is_ok() {
+            let name = crate::sysicon::display_name(&root)
+                .unwrap_or_else(|| format!("{}:", c as char));
             out.push(DirNode {
-                name: format!("{}:", c as char),
+                name,
                 path: root,
                 has_children: true,
             });
@@ -1295,16 +1302,10 @@ fn dir_roots() -> Vec<DirNode> {
     }]
 }
 
-/// 홈 디렉터리, Windows = %USERPROFILE%, 기타 = $HOME
+/// 홈 디렉터리($HOME), 비-Windows 의 바로가기 기준
+#[cfg(not(windows))]
 fn home_dir() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        std::env::var_os("USERPROFILE").map(PathBuf::from)
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var_os("HOME").map(PathBuf::from)
-    }
+    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 /// 압축 창(label compress) 열기, 이미 열려 있으면 큐 적재 + compress:take-inputs 신호만
@@ -1722,9 +1723,9 @@ pub async fn open_extract_window(
         WebviewUrl::App("index.html".into()),
     )
     .title(zipmania_i18n::text("extract.windowTitle", &crate::update::language(&app)))
-    // 인라인 폴더 트리 포함 → 크게 연다
-    .inner_size(640.0, 600.0)
-    .min_inner_size(560.0, 520.0)
+    // 인라인 폴더 브라우저(바로가기 + 트리) 포함 → 크게 연다
+    .inner_size(760.0, 600.0)
+    .min_inner_size(660.0, 520.0)
     .center()
     // 숨겨서 생성 → 다크 캡션 → 표시
     .visible(false)

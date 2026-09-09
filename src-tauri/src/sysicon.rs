@@ -7,20 +7,7 @@ static ICON_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// 확장자(소문자, 점 없음) + 폴더 여부 → 16x16 시스템 아이콘 RGBA8 PNG, 실패 = None
 #[cfg(windows)]
 pub fn icon_png(ext: &str, is_dir: bool) -> Option<Vec<u8>> {
-    use windows::core::PCWSTR;
-
-    // 동시 접근 경합 방지, 잠금 오염돼도 그대로 진행
-    let _guard = ICON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
-    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
-    use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
-
-    // SHGetFileInfoW 는 호출 스레드에 COM 초기화 필요, 이 함수가 초기화한 경우에만 해제
-    let com_hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-    let com_owned = com_hr.is_ok();
 
     // USEFILEATTRIBUTES 사용 → 실제 파일 불필요, 폴더 = x, 파일 = x.<ext>
     let dummy = if is_dir || ext.is_empty() {
@@ -33,12 +20,81 @@ pub fn icon_png(ext: &str, is_dir: bool) -> Option<Vec<u8>> {
     } else {
         FILE_ATTRIBUTE_NORMAL
     };
+    shell_icon(&dummy, attrs, true)
+}
+
+/// 실제 경로 → 16x16 시스템 아이콘 PNG, 특수 폴더(바탕 화면, 다운로드 등)의 고유 아이콘 반영
+#[cfg(windows)]
+pub fn path_icon_png(path: &str) -> Option<Vec<u8>> {
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+
+    shell_icon(path, FILE_ATTRIBUTE_NORMAL, false)
+}
+
+/// 실제 경로 → 셸 표시 이름, 드라이브 = 로컬 디스크 (C:) 같은 탐색기 표기, 실패 = None
+#[cfg(windows)]
+pub fn display_name(path: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_DISPLAYNAME};
+
+    let _guard = ICON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut info = SHFILEINFOW::default();
+    let ret = unsafe {
+        SHGetFileInfoW(
+            PCWSTR(wide.as_ptr()),
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_DISPLAYNAME,
+        )
+    };
+    if ret == 0 {
+        return None;
+    }
+    let end = info
+        .szDisplayName
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(info.szDisplayName.len());
+    let name = String::from_utf16_lossy(&info.szDisplayName[..end]);
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// SHGetFileInfoW(SHGFI_ICON, SHGFI_SMALLICON) → PNG, by_attrs = 실제 파일 미조회
+#[cfg(windows)]
+fn shell_icon(
+    spec: &str,
+    attrs: windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
+    by_attrs: bool,
+) -> Option<Vec<u8>> {
+    use windows::core::PCWSTR;
+
+    // 동시 접근 경합 방지, 잠금 오염돼도 그대로 진행
+    let _guard = ICON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
+
+    // SHGetFileInfoW 는 호출 스레드에 COM 초기화 필요, 이 함수가 초기화한 경우에만 해제
+    let com_hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let com_owned = com_hr.is_ok();
 
     // 널 종료 UTF-16 문자열
-    let wide: Vec<u16> = dummy.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = spec.encode_utf16().chain(std::iter::once(0)).collect();
 
     let mut info = SHFILEINFOW::default();
-    let flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+    let mut flags = SHGFI_ICON | SHGFI_SMALLICON;
+    if by_attrs {
+        flags |= SHGFI_USEFILEATTRIBUTES;
+    }
 
     // SHGetFileInfoW 로 작은(16x16) 아이콘 핸들을 얻는다
     let result = unsafe {
@@ -240,6 +296,18 @@ fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
 /// 비-Windows 스텁, 항상 None
 #[cfg(not(windows))]
 pub fn icon_png(_ext: &str, _is_dir: bool) -> Option<Vec<u8>> {
+    None
+}
+
+/// 비-Windows 스텁, 표시 이름
+#[cfg(not(windows))]
+pub fn display_name(_path: &str) -> Option<String> {
+    None
+}
+
+/// 비-Windows 스텁, 경로용
+#[cfg(not(windows))]
+pub fn path_icon_png(_path: &str) -> Option<Vec<u8>> {
     None
 }
 
