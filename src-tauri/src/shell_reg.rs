@@ -1,7 +1,7 @@
 //! 탐색기 우클릭 통합 등록, IContextMenu 셸 확장(ZipManiaShell.dll, CLSID 1개) → HKCU
 //! 자리 = *\ShellEx\ContextMenuHandlers\ZipMania, Directory\ShellEx\… CLSID 는 ZipManiaShell.cpp 와 동일(D3.7)
 //! 등록 판정 = CLSID InprocServer32 + 핸들러 키 2개 + DLL 파일 실재, 셋 모두
-//! 메뉴 경로 선택 = sync_all 한 곳, Win11 은 스파스 MSIX, 그 아래는 클래식 HKCU
+//! 메뉴 등록 = sync_all 한 곳, Win11 은 스파스 MSIX + 클래식 HKCU 둘 다, 그 아래는 클래식만
 //! UAC 해제(승격 셸)는 Win11 이어도 클래식, 승격 프로세스에 패키지 신원 미부여
 
 #![allow(dead_code)]
@@ -177,7 +177,7 @@ pub fn sync(enabled: bool, dll: &str) {
 /// 메뉴 등록 경로 선택, root = 설치 루트(ZipMania.exe 가 있는 자리 = 패키지 외부 위치)
 /// dll = 셸 확장 절대경로(root 아래 SHELLEXT_DIR), 둘은 같은 폴더가 아니다
 /// force = 이미 등록돼 있어도 다시 등록, 설치/갱신 경로 전용
-/// Win11 은 패키지, 실패하면 클래식으로 물러난다 — 둘 다 없으면 메뉴가 통째로 사라진다
+/// Win11 은 패키지 + 클래식 둘 다, 표시 중복은 DLL 의 PackagedMenuActive 가 거른다 (D3.7)
 #[cfg(windows)]
 pub fn sync_all(enabled: bool, root: &std::path::Path, dll: &str, force: bool) {
     if !enabled {
@@ -190,15 +190,10 @@ pub fn sync_all(enabled: bool, root: &std::path::Path, dll: &str, force: bool) {
     if crate::msix::is_win11() && crate::msix::shell_hosts_packages() {
         // 갱신에서 다시 걸지 않으면 매니페스트를 고쳐도 옛 등록이 그대로 남는다
         // 등록 자리가 바뀐 판으로 올라간 사용자는 메뉴가 조용히 죽는다
-        let ok = if force || !crate::msix::is_registered() {
-            crate::msix::register(root).is_ok()
-        } else {
-            true
-        };
-        if ok {
-            // 같은 메뉴가 레거시에서 두 번 뜨지 않게 클래식은 내린다
-            sync(false, dll);
-            return;
+        // 이름이 아니라 외부 위치까지 대조, 옛 폴더를 가리키는 등록은 재등록 대상
+        // 클래식은 성패와 무관하게 유지, 새 메뉴를 끈 PC 는 패키지 항목을 아예 띄우지 않는다
+        if force || !crate::msix::is_registered_at(root) {
+            let _ = crate::msix::register(root);
         }
     } else {
         let _ = crate::msix::unregister();

@@ -167,9 +167,54 @@ mod imp {
             .collect()
     }
 
+    // 등록된 패키지들의 외부 위치, 읽지 못한 항목 제외
+    fn installed_external_paths() -> Vec<String> {
+        let Ok(pm) = manager() else {
+            return Vec::new();
+        };
+        let found = pm.FindPackagesByUserSecurityIdNamePublisher(
+            &HSTRING::new(),
+            &HSTRING::from(PKG_NAME),
+            &HSTRING::from(PKG_PUBLISHER),
+        );
+        let Ok(found) = found else {
+            return Vec::new();
+        };
+        found
+            .into_iter()
+            .filter_map(|p| p.EffectiveExternalPath().ok())
+            .map(|s| s.to_string_lossy())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    // 대소문자, 끝 구분자, verbatim 접두사를 무시한 경로 비교
+    pub(super) fn same_path(a: &str, b: &str) -> bool {
+        let norm = |s: &str| {
+            s.trim_start_matches(r"\\?\")
+                .trim_end_matches(['\\', '/'])
+                .replace('/', "\\")
+                .to_lowercase()
+        };
+        norm(a) == norm(b)
+    }
+
     /// 등록 여부
     pub fn is_registered() -> bool {
         !installed_full_names().is_empty()
+    }
+
+    /// 등록 자리 = root 판정, 외부 위치를 하나도 읽지 못하면 이름 조회로 폴백 (D3.7)
+    pub fn is_registered_at(root: &Path) -> bool {
+        if !is_registered() {
+            return false;
+        }
+        let paths = installed_external_paths();
+        if paths.is_empty() {
+            return true;
+        }
+        let want = root.to_string_lossy();
+        paths.iter().any(|p| same_path(p, &want))
     }
 
     /// 설치 루트를 외부 위치로 삼아 등록, 패키지 파일은 그 아래 셸 폴더
@@ -225,14 +270,14 @@ mod imp {
 // ── 공개 API(플랫폼 무관 래퍼) ───────────────────────────────────────────────
 
 #[cfg(windows)]
-pub use imp::{is_registered, is_win11, register, shell_hosts_packages, unregister};
+pub use imp::{is_registered_at, is_win11, register, shell_hosts_packages, unregister};
 
 #[cfg(not(windows))]
 pub fn is_win11() -> bool {
     false
 }
 #[cfg(not(windows))]
-pub fn is_registered() -> bool {
+pub fn is_registered_at(_root: &std::path::Path) -> bool {
     false
 }
 #[cfg(not(windows))]
@@ -360,6 +405,34 @@ mod tests {
         );
         assert!(!hosts_packages(Some(1), None, true), "FilterAdministratorToken 기본값은 꺼짐");
         assert!(hosts_packages(Some(1), Some(1), true), "승인 모드면 비승격 토큰");
+    }
+
+    /// 현행 규격 = win32App 선언, EntryPoint 방식은 등록만 되고 셸이 COM 클래스 미활성 (D3.7)
+    #[test]
+    fn 매니페스트가_win32_앱을_선언한다() {
+        for want in [
+            r#"uap10:TrustLevel="mediumIL""#,
+            r#"uap10:RuntimeBehavior="win32App""#,
+            r#"<rescap:Capability Name="unvirtualizedResources" />"#,
+        ] {
+            assert!(MANIFEST.contains(want), "AppxManifest 에 {want} 가 없다");
+        }
+        assert!(
+            !MANIFEST.contains("EntryPoint="),
+            "EntryPoint 방식과 win32App 선언을 함께 두지 않는다"
+        );
+    }
+
+    /// 외부 위치 = 등록 때 넘긴 문자열 그대로, 표기 차이로 인한 오판 금지 (D3.7)
+    #[cfg(windows)]
+    #[test]
+    fn 경로_비교는_표기_차이를_무시한다() {
+        use super::imp::same_path;
+        assert!(same_path(r"C:\Users\a\ZipMania", r"c:\users\a\zipmania"));
+        assert!(same_path(r"C:\Users\a\ZipMania\", r"C:\Users\a\ZipMania"));
+        assert!(same_path(r"\\?\C:\Users\a\ZipMania", r"C:\Users\a\ZipMania"));
+        assert!(same_path("C:/Users/a/ZipMania", r"C:\Users\a\ZipMania"));
+        assert!(!same_path(r"C:\Users\a\ZipManiaOld", r"C:\Users\a\ZipMania"));
     }
 }
 

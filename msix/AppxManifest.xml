@@ -5,6 +5,8 @@
   경로는 외부 위치(= 설치 루트) 기준, ZipMania.exe 는 루트, 셸 확장은 shell\x64
   Publisher = 코드 서명 인증서의 Subject 와 글자 하나까지 동일해야 등록된다
   Clsid = ZipManiaShell.cpp 의 CLSID_ZipManiaCommand 와 동일
+  Win32 앱 선언 = uap10:TrustLevel, uap10:RuntimeBehavior, unvirtualizedResources 셋이 한 벌, EntryPoint 방식 금지
+  매니페스트 수정 = Identity 의 Version 상향 필수, 같은 버전은 기존 등록 미갱신
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -20,7 +22,8 @@
   <Identity
     Name="Kilhonet.ZipMania"
     Publisher="CN=Kilho Oh, O=Kilho Oh, L=Seoul, S=Seoul, C=KR"
-    Version="1.0.0.0" />
+    Version="1.0.1.0"
+    ProcessorArchitecture="neutral" />
 
   <Properties>
     <DisplayName>ZipMania</DisplayName>
@@ -40,10 +43,11 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 
   <Applications>
-    <Application Id="ZipMania" Executable="ZipMania.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="ZipMania" Executable="ZipMania.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
       <uap:VisualElements
         DisplayName="ZipMania"
         Description="ZipMania"

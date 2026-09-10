@@ -45,6 +45,8 @@ static constexpr GUID CLSID_ZipManiaCommand = {
     0xF58510CC, 0x5B40, 0x48D9, {0xA9, 0xFE, 0x12, 0x0F, 0xD5, 0xF2, 0x3D, 0xAE}};
 
 static HMODULE g_module = nullptr;
+// 패키지 경로(CLSID_ZipManiaCommand)로 활성화된 적이 있음, 프로세스 수명, IContextMenu 숨김 근거 (D3.7)
+static volatile LONG g_packageLive = 0;
 static HBITMAP g_menuBitmap = nullptr; // 메뉴 항목용 ZipMania.exe 아이콘 비트맵(1회 생성, 캐시)
 
 // 아카이브 확장자(소문자, 점 없음) — 정본 READ_EXTS 의 사본, ext_tests 가 대조
@@ -85,6 +87,24 @@ static std::wstring ExePath()
         return buf;
     }
     return ParentDir(ParentDir(ModuleDir())) + L"\\ZipMania.exe";
+}
+
+// HKCU 키 존재 여부
+static bool KeyExists(const wchar_t* sub)
+{
+    HKEY h{};
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, sub, 0, KEY_READ, &h) != ERROR_SUCCESS) return false;
+    RegCloseKey(h);
+    return true;
+}
+
+// 패키지 IExplorerCommand 가 이 메뉴를 맡고 있는지 = 실제 활성화 이력, 또는 새 메뉴 켜짐 + 패키지 COM 클래스 등록
+// 참이면 IContextMenu 는 항목을 넣지 않는다, 클래식 메뉴 강제({86ca1aa0…} 키)면 패키지 항목이 아예 안 뜨므로 거짓 (D3.7)
+static bool PackagedMenuActive()
+{
+    if (g_packageLive) return true;
+    if (KeyExists(L"Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32")) return false;
+    return KeyExists(L"Software\\Classes\\PackagedCom\\ClassIndex\\{F58510CC-5B40-48D9-A9FE-120FD5F23DAE}");
 }
 
 static std::wstring ToLower(std::wstring s)
@@ -391,6 +411,9 @@ struct MenuHandler : implements<MenuHandler, IShellExtInit, IContextMenu>
     {
         if (uFlags & CMF_DEFAULTONLY)
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
+        // 패키지 쪽이 새 메뉴와 [추가 옵션 표시] 를 다 맡을 때 중복 방지
+        if (PackagedMenuActive())
+            return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
 
         m_verbs.clear();
         auto entries = BuildEntries(m_files);
@@ -638,7 +661,10 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** instance)
         if (rclsid == CLSID_ZipManiaMenu)
             return make<ClassFactory<MenuHandler>>()->QueryInterface(riid, instance);
         if (rclsid == CLSID_ZipManiaCommand)
+        {
+            InterlockedExchange(&g_packageLive, 1);
             return make<ClassFactory<RootCommand>>()->QueryInterface(riid, instance);
+        }
         return CLASS_E_CLASSNOTAVAILABLE;
     }
     catch (...)
