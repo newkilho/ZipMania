@@ -46,7 +46,9 @@
 
 ## 作者
 
-**Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+**Kilho.net** · [https://v2.kilho.net/zipmania](https://v2.kilho.net/zipmania)
+
+这是我人生第一次用「vibe coding」做出的程序。欢迎随时提出意见和建议。
 
 ## 许可证
 

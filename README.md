@@ -46,7 +46,9 @@ A dedicated ZIP engine handles ZIP archives directly.
 
 ## Author
 
-**Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+**Kilho.net** · [https://v2.kilho.net/zipmania](https://v2.kilho.net/zipmania)
+
+My very first vibe-coded project. Thoughts and suggestions are always welcome.
 
 ## License
 

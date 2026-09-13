@@ -46,7 +46,9 @@ ZIP 専用エンジンで高速に処理します。
 
 ## 作者
 
-**Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+**Kilho.net** · [https://v2.kilho.net/zipmania](https://v2.kilho.net/zipmania)
+
+生まれて初めてのバイブコーディングで作ったプログラムです。ご意見・ご提案はいつでも歓迎します。
 
 ## ライセンス
 

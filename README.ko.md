@@ -46,7 +46,9 @@ ZIP 전용 엔진을 사용해 빠르게 처리합니다.
 
 ## 만든 이
 
-**Kilho.net** · [https://v2.kilho.net](https://v2.kilho.net)
+**Kilho.net** · [https://v2.kilho.net/zipmania](https://v2.kilho.net/zipmania)
+
+생애 첫 바이브 코딩으로 만든 프로그램입니다. 의견과 제안은 언제나 환영합니다.
 
 ## 라이선스
 
