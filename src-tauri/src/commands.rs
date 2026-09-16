@@ -421,12 +421,16 @@ fn session_pw_clear_if_other(app: &tauri::AppHandle, archive: &str) {
     }
 }
 
-/// 번들 7z.dll 경로, dev = CARGO_MANIFEST_DIR/binaries, 배포 = exe 옆
+/// 번들 7z.dll 경로, 앱 핸들 없는 호출용(콘솔 명령), 본체 = sevenzip_dll_file
 pub fn sevenzip_dll_path(app: &tauri::AppHandle) -> Result<PathBuf, SevenZipError> {
+    let _ = app;
+    sevenzip_dll_file()
+}
+
+/// 번들 7z.dll 경로, dev = CARGO_MANIFEST_DIR/binaries, 배포 = exe 옆
+pub fn sevenzip_dll_file() -> Result<PathBuf, SevenZipError> {
     #[cfg(debug_assertions)]
     {
-    // app = 릴리스 경로 해석 전용
-        let _ = app;
         Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("binaries")
             .join("7z.dll"))
@@ -435,7 +439,6 @@ pub fn sevenzip_dll_path(app: &tauri::AppHandle) -> Result<PathBuf, SevenZipErro
     #[cfg(not(debug_assertions))]
     {
         // 포터블 배포 = exe 옆 평면 배치
-        let _ = app;
         let dir = std::env::current_exe()
             .ok()
             .and_then(|e| e.parent().map(|p| p.to_path_buf()))
@@ -907,6 +910,8 @@ pub fn create_archive(
     level: u8,
     password: Option<String>,
     encrypt_names: bool,
+    // 분할 볼륨 바이트, None = 분할 없음
+    volume: Option<u64>,
     // 창 세션 토큰, 창이 닫힌 뒤 도착한 지연 호출 차단, label 재조회 금지
     session: Option<String>,
 ) -> Result<String, ZipManiaError> {
@@ -919,6 +924,8 @@ pub fn create_archive(
         level,
         password,
         encrypt_names,
+        volume: volume.filter(|v| *v > 0),
+        threads: None,
     };
 
     // 작업 등록(동시 1작업 제한), 실패 시 즉시 오류 반환

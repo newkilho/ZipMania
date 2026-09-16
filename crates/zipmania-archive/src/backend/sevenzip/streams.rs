@@ -22,12 +22,14 @@ fn io_err(ctx: &str, e: std::io::Error) -> ZipManiaError {
 enum InBacking {
     File(File),
     Mem { data: Vec<u8>, pos: u64 },
+    Volumes(crate::volumes::VolumeReader),
 }
 
 impl InBacking {
     fn read(&mut self, buf: &mut [u8]) -> usize {
         match self {
             InBacking::File(f) => f.read(buf).unwrap_or(0),
+            InBacking::Volumes(v) => v.read(buf).unwrap_or(0),
             InBacking::Mem { data, pos } => {
                 let cur = (*pos).min(data.len() as u64) as usize;
                 let n = (data.len() - cur).min(buf.len());
@@ -49,6 +51,15 @@ impl InBacking {
                 };
                 f.seek(from).ok()
             }
+            InBacking::Volumes(v) => {
+                let from = match origin {
+                    STREAM_SEEK_SET => SeekFrom::Start(offset.max(0) as u64),
+                    STREAM_SEEK_CUR => SeekFrom::Current(offset),
+                    STREAM_SEEK_END => SeekFrom::End(offset),
+                    _ => return None,
+                };
+                v.seek(from).ok()
+            }
             InBacking::Mem { data, pos } => {
                 let base = match origin {
                     STREAM_SEEK_SET => 0i64,
@@ -66,6 +77,7 @@ impl InBacking {
     fn size(&mut self) -> u64 {
         match self {
             InBacking::File(f) => f.metadata().map(|m| m.len()).unwrap_or(0),
+            InBacking::Volumes(v) => v.len(),
             InBacking::Mem { data, .. } => data.len() as u64,
         }
     }
@@ -139,6 +151,16 @@ pub fn open_input_file(path: &Path) -> Result<IInStream, ZipManiaError> {
     .into())
 }
 
+/// 분할 볼륨 이어 읽기 입력 스트림(IInStream), first = <대상>.001
+pub fn open_input_volumes(first: &Path) -> Result<IInStream, ZipManiaError> {
+    let v = crate::volumes::VolumeReader::open(first)
+        .map_err(|e| io_err("분할 아카이브를 열지 못했습니다", e))?;
+    Ok(InStream {
+        inner: Mutex::new(InBacking::Volumes(v)),
+    }
+    .into())
+}
+
 /// 메모리 바이트 백킹 입력 스트림(IInStream), 테스트, 왕복용
 pub fn input_from_mem(data: Vec<u8>) -> IInStream {
     InStream {
@@ -163,6 +185,8 @@ enum OutBacking {
     Mem(Arc<Mutex<Vec<u8>>>),
     /// 임의 writer 순차 스트리밍(드래그 지연 렌더링 바운디드 채널 등), 탐색 불가
     Writer(Box<dyn std::io::Write + Send>),
+    /// 분할 산출, Arc 공유 = 스트림 해제 후 호출측이 회수해 commit
+    Volumes(Arc<Mutex<crate::outfile::VolumeSet>>),
 }
 
 struct OutInner {
@@ -207,6 +231,14 @@ impl OutInner {
                 self.pos += src.len() as u64;
                 true
             }
+            OutBacking::Volumes(v) => {
+                let mut v = v.lock().unwrap();
+                if v.seek(SeekFrom::Start(self.pos)).is_err() || v.write_all(src).is_err() {
+                    return false;
+                }
+                self.pos += src.len() as u64;
+                true
+            }
         }
     }
 
@@ -216,6 +248,7 @@ impl OutInner {
             OutBacking::Mem(buf) => buf.lock().unwrap().len() as i64,
             // 스트리밍 writer = 탐색 불가, 현재 위치 기준만 인정
             OutBacking::Writer(_) => self.pos as i64,
+            OutBacking::Volumes(v) => v.lock().unwrap().len() as i64,
         };
         let base = match origin {
             STREAM_SEEK_SET => 0i64,
@@ -251,6 +284,7 @@ impl OutInner {
             }
             // writer 는 크기 선지정 개념 없음 → 무시하고 성공 처리
             OutBacking::Writer(_) => true,
+            OutBacking::Volumes(v) => v.lock().unwrap().set_len(new_size).is_ok(),
         }
     }
 }
@@ -363,6 +397,18 @@ pub fn output_seekable_file(f: std::fs::File) -> Result<IOutStream, ZipManiaErro
         }),
     }
     .into())
+}
+
+/// 분할 생성 출력(IOutStream), 볼륨 경계는 VolumeSet 이 처리, 마감은 호출측이 Arc 회수 후 commit
+pub fn output_volumes(v: Arc<Mutex<crate::outfile::VolumeSet>>) -> IOutStream {
+    OutStream {
+        inner: Mutex::new(OutInner {
+            backing: OutBacking::Volumes(v),
+            pos: 0,
+            mem_cap: crate::formats::MAX_MEMORY_ENTRY_BYTES,
+        }),
+    }
+    .into()
 }
 
 #[cfg(test)]

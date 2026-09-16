@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::ZipManiaError;
+use crate::volumes::volume_name;
 
 /// 임시 이름용 128비트 난수(32자리 16진수), CSPRNG 아님 → 삭제 판단 근거 금지 (D3.5)
 fn random_token() -> String {
@@ -224,9 +225,309 @@ impl Drop for StagedFile {
     }
 }
 
+/// 분할 산출 writer(Write + Seek), 볼륨마다 임시 파일, commit 에서 일괄 이동
+/// 볼륨 1개로 끝나면 대상 이름 그대로(.001 하나짜리 세트 금지), 7z, zip 공용 (D3.18)
+pub struct VolumeSet {
+    target: PathBuf,
+    size: u64,
+    vols: Vec<(TmpPath, std::fs::File)>,
+    pos: u64,
+    last_err: Option<String>,
+}
+
+impl VolumeSet {
+    /// size = 볼륨 바이트 수, 0 금지
+    pub fn new(target: &Path, size: u64) -> Result<Self, ZipManiaError> {
+        if size == 0 {
+            return Err(ZipManiaError::new("invalid_volume", "분할 크기가 0 입니다."));
+        }
+        Ok(Self {
+            target: target.to_path_buf(),
+            size,
+            vols: Vec::new(),
+            pos: 0,
+            last_err: None,
+        })
+    }
+
+    /// 마지막 쓰기, 확장 오류(1회 회수), COM 스트림은 HRESULT 만 돌려주므로 원문은 여기서
+    pub fn take_error(&mut self) -> Option<String> {
+        self.last_err.take()
+    }
+
+    fn fail<T>(&mut self, e: std::io::Error) -> std::io::Result<T> {
+        self.last_err = Some(e.to_string());
+        Err(e)
+    }
+
+    pub fn volume_count(&self) -> usize {
+        self.vols.len()
+    }
+
+    /// 전체 길이 = 마지막 볼륨 이전은 size, 마지막은 실제 파일 길이
+    pub fn len(&self) -> u64 {
+        match self.vols.last() {
+            None => 0,
+            Some((_, f)) => {
+                let last = f.metadata().map(|m| m.len()).unwrap_or(0);
+                (self.vols.len() as u64 - 1) * self.size + last
+            }
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.vols.is_empty()
+    }
+
+    /// idx(0부터) 볼륨까지 확보, 앞 볼륨은 size 로 채움(건너뛴 seek 뒤 쓰기)
+    fn ensure(&mut self, idx: usize) -> std::io::Result<()> {
+        while self.vols.len() <= idx {
+            let n = self.vols.len() + 1;
+            let mut tmp = reserve_tmp(&volume_name(&self.target, n))
+                .map_err(|e| std::io::Error::other(e.message))?;
+            let f = tmp
+                .take_file()
+                .ok_or_else(|| std::io::Error::other("임시 파일 핸들 없음"))?;
+            if let Some((_, prev)) = self.vols.last() {
+                prev.set_len(self.size)?;
+            }
+            self.vols.push((tmp, f));
+        }
+        Ok(())
+    }
+
+    /// 길이 변경, 줄이면 뒤 볼륨 삭제(Drop), 늘리면 볼륨 추가
+    pub fn set_len(&mut self, new_len: u64) -> std::io::Result<()> {
+        if new_len == 0 {
+            self.vols.clear();
+            return Ok(());
+        }
+        let count = new_len.div_ceil(self.size) as usize;
+        let last_len = new_len - (count as u64 - 1) * self.size;
+        self.ensure(count - 1)?;
+        self.vols.truncate(count);
+        self.vols[count - 1].1.set_len(last_len)
+    }
+
+    /// 완성 → 볼륨 전부 제자리 이동, 하나라도 실패하면 옮긴 것을 되돌림, 반환 = 최종 경로들
+    /// 옛 세트의 다음 번호가 남아 있으면 이동 전에 거부(섞이면 Split 핸들러가 이어 붙임)
+    pub fn commit(mut self) -> Result<Vec<PathBuf>, ZipManiaError> {
+        let n = self.vols.len();
+        if n == 0 {
+            return Err(ZipManiaError::new("output_error", "산출물이 비었습니다."));
+        }
+        let finals: Vec<PathBuf> = if n == 1 {
+            vec![self.target.clone()]
+        } else {
+            (1..=n).map(|i| volume_name(&self.target, i)).collect()
+        };
+        let stale = if n == 1 {
+            volume_name(&self.target, 1)
+        } else {
+            volume_name(&self.target, n + 1)
+        };
+        if stale.exists() {
+            return Err(ZipManiaError::new(
+                "stale_volume",
+                format!("옛 분할 파일이 남아 있습니다: {}", stale.display()),
+            ));
+        }
+        // Windows = 열린 파일 rename 불가
+        let mut vols: Vec<TmpPath> = self.vols.drain(..).map(|(t, _)| t).collect();
+        let mut moved = 0usize;
+        let mut err = None;
+        for (t, dst) in vols.iter().zip(finals.iter()) {
+            if let Err(e) = commit_replace(&t.path, dst) {
+                err = Some(e);
+                break;
+            }
+            moved += 1;
+        }
+        match err {
+            None => {
+                for t in vols.iter_mut() {
+                    t.committed = true;
+                    live_remove(&t.path);
+                }
+                Ok(finals)
+            }
+            Some(e) => {
+                // 되돌리기 실패분은 최종 이름으로 남음(불완전 세트), Drop 정리 대상 아님
+                for (t, dst) in vols.iter_mut().zip(finals.iter()).take(moved) {
+                    if std::fs::rename(dst, &t.path).is_err() {
+                        t.committed = true;
+                        live_remove(&t.path);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn set_pos(&mut self, p: u64) -> u64 {
+        self.pos = p;
+        p
+    }
+}
+
+impl std::io::Write for VolumeSet {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use std::io::{Seek, SeekFrom};
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let idx = (self.pos / self.size) as usize;
+        let off = self.pos % self.size;
+        let room = (self.size - off) as usize;
+        let n = buf.len().min(room);
+        if let Err(e) = self.ensure(idx) {
+            return self.fail(e);
+        }
+        let f = &mut self.vols[idx].1;
+        if let Err(e) = f.seek(SeekFrom::Start(off)).and_then(|_| f.write_all(&buf[..n])) {
+            return self.fail(e);
+        }
+        self.pos += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        for (_, f) in self.vols.iter_mut() {
+            f.flush()?;
+        }
+        Ok(())
+    }
+}
+
+impl std::io::Seek for VolumeSet {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        use std::io::SeekFrom;
+        let (base, delta) = match pos {
+            SeekFrom::Start(p) => return Ok(self.set_pos(p)),
+            SeekFrom::Current(d) => (self.pos as i64, d),
+            SeekFrom::End(d) => (self.len() as i64, d),
+        };
+        let np = base
+            .checked_add(delta)
+            .filter(|v| *v >= 0)
+            .ok_or_else(|| std::io::Error::other("탐색 위치 범위 밖"))?;
+        Ok(self.set_pos(np as u64))
+    }
+}
+
+/// 생성 산출 writer(Write + Seek), 단일 임시 파일 또는 분할, 마감은 호출측이 variant 별로
+pub enum OutSink {
+    File(std::fs::File),
+    Volumes(VolumeSet),
+}
+
+impl std::io::Write for OutSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            OutSink::File(f) => f.write(buf),
+            OutSink::Volumes(v) => v.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            OutSink::File(f) => f.flush(),
+            OutSink::Volumes(v) => v.flush(),
+        }
+    }
+}
+
+impl std::io::Seek for OutSink {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        match self {
+            OutSink::File(f) => f.seek(pos),
+            OutSink::Volumes(v) => v.seek(pos),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use crate::volumes::volume_name;
+
+    /// 분할 writer 계약, 경계 넘는 쓰기, 되감기 패치, 줄이기, 1개면 대상 이름
+    #[test]
+    fn 분할_볼륨_쓰기와_마감() {
+        let root = std::env::temp_dir().join(format!("zm_vol_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("결과.7z");
+
+        // 1. 10바이트 볼륨에 25바이트 → 3볼륨, 경계에서 잘림
+        let mut v = super::VolumeSet::new(&target, 10).unwrap();
+        let data: Vec<u8> = (0u8..25).collect();
+        v.write_all(&data).unwrap();
+        assert_eq!(v.volume_count(), 3);
+        assert_eq!(v.len(), 25);
+
+        // 2. 되감아 첫 볼륨 패치(7z 시작 헤더), 위치는 다시 끝으로
+        v.seek(SeekFrom::Start(3)).unwrap();
+        v.write_all(&[0xAA, 0xBB]).unwrap();
+        assert_eq!(v.seek(SeekFrom::End(0)).unwrap(), 25);
+
+        // 3. 줄이면 뒤 볼륨이 사라진다
+        v.set_len(12).unwrap();
+        assert_eq!(v.volume_count(), 2);
+        assert_eq!(v.len(), 12);
+        v.set_len(25).unwrap();
+        assert_eq!(v.volume_count(), 3);
+
+        // 4. 마감 → .001 .002 .003, 임시 파일 없음
+        let finals = v.commit().unwrap();
+        assert_eq!(finals.len(), 3);
+        assert!(finals[0].ends_with("결과.7z.001"));
+        let mut all = Vec::new();
+        for p in &finals {
+            fs::File::open(p).unwrap().read_to_end(&mut all).unwrap();
+        }
+        let mut want = data.clone();
+        want[3] = 0xAA;
+        want[4] = 0xBB;
+        // 12 로 줄였다 25 로 늘린 구간은 0
+        for b in want.iter_mut().skip(12) {
+            *b = 0;
+        }
+        assert_eq!(all, want);
+        assert!(
+            fs::read_dir(&root)
+                .unwrap()
+                .all(|e| !e.unwrap().file_name().to_string_lossy().contains(".zmtmp-")),
+            "임시 파일이 남았다"
+        );
+
+        // 5. 옛 세트의 다음 번호가 남아 있으면 거부, 아무것도 옮기지 않는다
+        let target2 = root.join("둘.7z");
+        fs::write(volume_name(&target2, 3), b"x").unwrap();
+        let mut v = super::VolumeSet::new(&target2, 10).unwrap();
+        v.write_all(&data[..15]).unwrap();
+        let e = v.commit().unwrap_err();
+        assert_eq!(e.code, "stale_volume");
+        assert!(!volume_name(&target2, 1).exists());
+
+        // 6. 볼륨 1개면 .001 없이 대상 이름
+        let target3 = root.join("하나.7z");
+        let mut v = super::VolumeSet::new(&target3, 100).unwrap();
+        v.write_all(&data).unwrap();
+        let finals = v.commit().unwrap();
+        assert_eq!(finals, vec![target3.clone()]);
+        assert!(target3.exists());
+
+        // 7. 놓으면 볼륨 전부 정리
+        let target4 = root.join("버림.7z");
+        let mut v = super::VolumeSet::new(&target4, 10).unwrap();
+        v.write_all(&data).unwrap();
+        drop(v);
+        assert!(!volume_name(&target4, 1).exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
 
     /// 임시 파일 소유권 계약, 정상 경로 = 반드시 정리, 이름 = 예측 불가
     #[test]

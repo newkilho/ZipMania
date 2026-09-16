@@ -34,6 +34,7 @@
   import { newMeter, sample } from "../lib/progress.js";
   import JobView from "./JobView.svelte";
   import { FORM_DEFAULTS, isFormDirty, batchIssueAfter, runPlan } from "../lib/compressPlan.js";
+  import { SPLIT_PRESETS, SPLIT_CUSTOM, resolveVolume } from "../lib/size.js";
   import { createCoordinator } from "../lib/compressCoordinator.js";
 
   // 스킨 미리보기 전용 — 백엔드 미호출, 표본 상태로 렌더, 실제 창은 기본값 그대로
@@ -63,6 +64,8 @@
   let level = 5;
   let password = "";
   let encryptNames = false;
+  let volume = FORM_DEFAULTS.volume; // 분할 셀렉트 값(0 = 없음, SPLIT_CUSTOM = 직접 입력, 그 외 바이트)
+  let volumeText = FORM_DEFAULTS.volumeText; // 직접 입력 문자열
   let outputSuggested = false; // 출력 경로 자동 제안을 1회만 하기 위한 플래그
 
   // 완료 후 동작 — 해제 창과 같은 두 가지, 설정에 기억
@@ -282,6 +285,8 @@
     encryptNames = FORM_DEFAULTS.encryptNames;
     eachMode = FORM_DEFAULTS.eachMode;
     showPasswordPanel = FORM_DEFAULTS.showPasswordPanel;
+    volume = FORM_DEFAULTS.volume;
+    volumeText = FORM_DEFAULTS.volumeText;
   }
 
   /**
@@ -435,6 +440,7 @@
         level,
         password: supportsPassword ? password : "",
         encryptNames: supportsEncryptNames && encryptNames,
+        volume: volumeBytes ?? 0,
       });
       jobId = id;
       doneTarget = item.output;
@@ -584,7 +590,10 @@
 
   // 각각 압축 = 항목마다 출력 계산 → 단일 출력 경로 불필요
   // canRun = 값의 문제(이 폼으로 압축 가능한가), canStart = 타이밍(지금 눌러도 되나), 자동 시작은 canRun 만(D3.5)
-  $: canRun = inputs.length > 0 && (eachMode || !!output) && !zipNonAsciiPw;
+  // 분할 크기, null = 직접 입력이 비었거나 틀림(시작 불가)
+  $: volumeBytes = resolveVolume(volume, volumeText);
+  $: volumeInvalid = volumeBytes === null;
+  $: canRun = inputs.length > 0 && (eachMode || !!output) && !zipNonAsciiPw && !volumeInvalid;
   $: canStart = canRun && !busy;
 
   // 시작 불가 사유(인라인 안내), $t 참조로 locale 변경 추적
@@ -868,6 +877,7 @@
       password: supportsPassword ? password : "",
       encryptNames: supportsEncryptNames && encryptNames,
       eachMode,
+      volume: volumeBytes ?? 0,
     };
     starting = true;
     startError = "";
@@ -896,6 +906,7 @@
         level: req.level,
         password: req.password,
         encryptNames: req.encryptNames,
+        volume: req.volume,
       });
       // 작업이 시작됨 → 진행 화면으로 전환, 진행률/완료는 job 이벤트로 이 창에 표시
       jobId = id;
@@ -1059,13 +1070,27 @@
           </p>
         {/if}
 
-        <!-- 분할 압축 (Phase 2, 비활성) -->
+        <!-- 분할 압축, 프리셋 또는 직접 입력(700M, 4GB) -->
         <div class="row">
           <span class="lb">{$t("compress.split")}</span>
-          <div class="grow">
-            <select class="full" disabled title={$t("common.comingSoon")}>
-              <option>{$t("compress.splitNone")}</option>
+          <div class="grow inline">
+            <select bind:value={volume}>
+              <option value={0}>{$t("compress.splitNone")}</option>
+              {#each SPLIT_PRESETS as p}
+                <option value={p.bytes}>{p.label}</option>
+              {/each}
+              <option value={SPLIT_CUSTOM}>{$t("compress.splitCustom")}</option>
             </select>
+            {#if volume === SPLIT_CUSTOM}
+              <input
+                type="text"
+                class="pw-in"
+                class:invalid={volumeText !== "" && volumeInvalid}
+                bind:value={volumeText}
+                placeholder="700M, 4GB"
+                title={$t("compress.splitCustomTitle")}
+              />
+            {/if}
           </div>
         </div>
 
@@ -1331,6 +1356,9 @@
     flex: 0 0 200px;
     width: 200px;
     min-width: 0;
+  }
+  .inline input.invalid {
+    border-color: var(--warn-text, #8a5a12);
   }
   .pw-check {
     flex: 0 0 auto;    color: var(--text-muted);

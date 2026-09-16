@@ -90,6 +90,8 @@
     --text-muted: #999999;
     --btn-bg: #333333;
     --accent: #3b82f6;
+    --window-border-active: #4a4a4a;
+    --window-border-inactive: #4a4a4a;
     --icon-archive: #5b9bf8;
     --scroll-thumb: #4a4a4a;
     --scroll-thumb-hover: #6a6a6a;
@@ -134,6 +136,8 @@
   --text-muted: #999999;
   --btn-bg: #333333;
   --accent: #3b82f6;
+  --window-border-active: #4a4a4a;
+  --window-border-inactive: #4a4a4a;
   --icon-archive: #5b9bf8;
   --scroll-thumb: #4a4a4a;
   --scroll-thumb-hover: #6a6a6a;

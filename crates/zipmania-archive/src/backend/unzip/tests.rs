@@ -59,6 +59,8 @@ fn create_opts(out: &str, inputs: &[String], level: u8, pw: Option<&str>) -> Cre
         level,
         password: pw.map(|s| s.to_string()),
         encrypt_names: false,
+        volume: None,
+        threads: None,
     }
 }
 

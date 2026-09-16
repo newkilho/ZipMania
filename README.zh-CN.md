@@ -17,6 +17,7 @@
 * 只解压所选择的文件
 * 直接打开压缩文件中的压缩文件
 * 密码保护与分卷压缩
+* 命令行压缩（Total Commander 等外部调用）
 * 添加/删除压缩文件内容及完整性检查
 * Windows 安全扫描（AMSI）
 * 资源管理器右键菜单与文件关联
@@ -38,6 +39,29 @@
 **打开：** 7Z, ZIP, ZIPX, JAR, RAR, EGG, ALZ, TAR, GZ, BZ2, XZ, ZST, ISO, IMG, WIM, DMG, MSI, RPM, DEB, CBZ, CBR 等 50 多种
 
 **压缩：** `7z` · `zip` · `tar`
+
+## 命令行
+
+无需打开窗口即可压缩的控制台命令（供 Total Commander 等外部程序调用）。选项与 Bandizip 相同。
+
+```
+ZipMania.exe c -l:9 -fmt:7z -v:4GB -aou -testdst -delsrc -date "backup_%y%m%d_%H%M.7z" "D:\Work"
+```
+
+| 选项 | 含义 |
+| --- | --- |
+| `-l:0..9` | 压缩级别 |
+| `-fmt:zip\|7z\|tar` | 格式（省略时按输出扩展名） |
+| `-v:700M` | 分卷大小（K/M/G） |
+| `-p:密码` | 密码 |
+| `-t:N` | 线程数（7z） |
+| `-aou` | 同名存在时改为 `名称 (2)` |
+| `-aos` | 同名存在时跳过 |
+| `-testdst` | 压缩后进行完整性检查 |
+| `-delsrc` | 检查通过后删除源文件 |
+| `-date` | 将文件名中的 `%Y %y %m %d %H %M %S` 替换为当前时间 |
+
+退出码为 0（成功）/ 1（警告：缺失项、检查失败、跳过）/ 2（错误）。运行 `ZipMania.exe --help` 查看全部选项。
 
 ## 系统要求
 

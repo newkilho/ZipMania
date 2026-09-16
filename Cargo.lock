@@ -5436,7 +5436,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "base64 0.22.1",
  "klib-dialog",
@@ -5449,6 +5449,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
+ "time",
  "toml 0.8.2",
  "windows",
  "windows-core 0.61.2",

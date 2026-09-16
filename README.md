@@ -17,6 +17,7 @@ Fast ZIP processing, built-in preview, and Explorer right-click integration.
 * Extract only the files you select
 * Open an archive nested inside another archive
 * Password protection and split archives
+* Command-line compression (Total Commander and other external callers)
 * Add/remove entries and run integrity checks
 * Windows security scanning (AMSI)
 * Explorer right-click menu and file associations
@@ -38,6 +39,29 @@ A dedicated ZIP engine handles ZIP archives directly.
 **Read:** 7Z, ZIP, ZIPX, JAR, RAR, EGG, ALZ, TAR, GZ, BZ2, XZ, ZST, ISO, IMG, WIM, DMG, MSI, RPM, DEB, CBZ, CBR and 50+ more
 
 **Write:** `7z` · `zip` · `tar`
+
+## Command Line
+
+A console command that compresses without opening a window (for external callers such as Total Commander). Options follow Bandizip.
+
+```
+ZipMania.exe c -l:9 -fmt:7z -v:4GB -aou -testdst -delsrc -date "backup_%y%m%d_%H%M.7z" "D:\Work"
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-l:0..9` | Compression level |
+| `-fmt:zip\|7z\|tar` | Format (defaults to the output extension) |
+| `-v:700M` | Volume size for split archives (K/M/G) |
+| `-p:password` | Password |
+| `-t:N` | Thread count (7z) |
+| `-aou` | Rename to `name (2)` if the target exists |
+| `-aos` | Skip if the target exists |
+| `-testdst` | Verify the archive after creation |
+| `-delsrc` | Delete the sources when verification passes |
+| `-date` | Replace `%Y %y %m %d %H %M %S` in the file name with the current time |
+
+Exit code is 0 (success) / 1 (warning: missing items, failed check, skipped) / 2 (error). Run `ZipMania.exe --help` for the full option list.
 
 ## Requirements
 

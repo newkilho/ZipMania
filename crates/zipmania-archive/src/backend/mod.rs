@@ -37,6 +37,8 @@ pub struct CreateOptions {
     pub level: u8,
     pub password: Option<String>,
     pub encrypt_names: bool,
+    pub volume: Option<u64>,
+    pub threads: Option<u32>,
 }
 
 /// 누락 사유, 프런트가 missing.<reason> 으로 번역, 사람이 읽을 문장 미포함

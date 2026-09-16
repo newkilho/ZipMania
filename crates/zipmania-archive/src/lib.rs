@@ -12,6 +12,7 @@ pub mod inputs;
 pub mod models;
 pub mod outfile;
 pub mod paths;
+pub mod volumes;
 
 // ── 공개 API 재노출 ──
 #[cfg(windows)]

@@ -260,9 +260,10 @@ export async function listFolderFiles(path) {
  * @param {number} opts.level 압축 레벨 (0/1/3/5/7/9)
  * @param {string} opts.password 암호(옵션, TAR 은 무시)
  * @param {boolean} [opts.encryptNames] 파일명 암호화(7z + 암호일 때만)
+ * @param {number} [opts.volume] 분할 볼륨 바이트, 0 이나 생략 = 분할 없음
  * @returns {Promise<string>} job_id
  */
-export async function createArchive({ output, inputs, format, level, password, encryptNames }) {
+export async function createArchive({ output, inputs, format, level, password, encryptNames, volume }) {
   const args = {
     output,
     inputs: inputs ?? [],
@@ -271,6 +272,7 @@ export async function createArchive({ output, inputs, format, level, password, e
     encryptNames: !!encryptNames,
   };
   if (password != null && password !== "") args.password = password;
+  if (volume > 0) args.volume = volume;
   args.session = await windowSession();
   return await invoke("create_archive", args);
 }

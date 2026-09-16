@@ -5,6 +5,7 @@ mod amsi;
 mod assoc_icon;
 mod assoc_picker;
 mod cli;
+mod cmdline;
 mod commands;
 mod except;
 mod jobs;
@@ -35,6 +36,10 @@ fn main() {
     // /inst, /uninst 는 창 없이 처리하고 끝낸다, Tauri 를 띄우기 전에 가로챌 것
     let argv: Vec<String> = std::env::args().collect();
     if let Some(code) = maintenance::run(&argv) {
+        std::process::exit(code);
+    }
+    // 콘솔 압축(c ...) 도 같은 자리, 창, single-instance 어느 것도 뜨지 않음
+    if let Some(code) = cmdline::run(&argv) {
         std::process::exit(code);
     }
 

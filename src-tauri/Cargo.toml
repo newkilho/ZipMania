@@ -1,6 +1,6 @@
 [package]
 name = "zipmania"
-version = "0.9.5"
+version = "0.9.6"
 description = "ZipMania - 현대적 Windows 압축 프로그램"
 authors = ["BNO Corp"]
 edition = "2021"
@@ -26,6 +26,8 @@ toml = "0.8"
 # 파일 목록의 실제 시스템 아이콘 추출용. Windows Shell/GDI API + PNG 인코딩 + base64 데이터 URI.
 png = "0.17"
 base64 = "0.22"
+# 콘솔 압축(-date)의 로컬 시각. 압축모듈이 이미 쓰는 크레이트라 새 의존은 아니다.
+time = { version = "0.3", features = ["local-offset"] }
 
 # 공용 라이브러리(KLib). 업데이트 확인과 네이티브 다이얼로그.
 klib-update = { path = "D:/Component/Rust/KLib/crates/klib-update" }
@@ -59,6 +61,8 @@ windows = { version = "0.61", features = [
     "Win32_UI_Accessibility",
     # 위 판정에 쓰는 GetCurrentProcessId. 토큰을 여는 OpenProcessToken 도 여기에 있다.
     "Win32_System_Threading",
+    # 콘솔 압축(c ...): GUI 서브시스템 exe 를 부모 콘솔에 붙이는 AttachConsole.
+    "Win32_System_Console",
     # 내장 Administrator 판정(msix): GetTokenInformation(TokenUser) + SID 의 RID 500.
     "Win32_Security",
     # 업데이트 확인에 보낼 OS 언어: GetUserDefaultLocaleName.

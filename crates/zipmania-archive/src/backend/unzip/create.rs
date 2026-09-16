@@ -16,7 +16,7 @@ use zip::{CompressionMethod, ZipWriter};
 
 use crate::backend::{CreateOptions, CreateResult, EditOptions, Progress, ProgressFn};
 use crate::error::ZipManiaError;
-use crate::outfile::reserve_tmp;
+use crate::outfile::{reserve_tmp, OutSink, TmpPath, VolumeSet};
 
 use super::{bigfile, canceled, entry_name, parallel, Archive};
 
@@ -90,6 +90,13 @@ fn abort(tmp: &std::path::Path) {
     let _ = std::fs::remove_file(tmp);
 }
 
+/// 생성 경로용, 분할(None)은 writer 안의 VolumeSet Drop 이 정리
+fn abort_out(tmp: Option<&TmpPath>) {
+    if let Some(t) = tmp {
+        abort(t);
+    }
+}
+
 /// 호출마다 재할당 금지, 파일당 256KiB → 3000개에서 체감 비용(실측)
 const READ_BUF: usize = 256 * 1024;
 
@@ -148,21 +155,30 @@ pub fn do_create(
 
     let out_path = PathBuf::from(&opts.output);
     // 자리를 create_new 로 선점, 이름만 만들고 File::create 하면 그 사이에 놓인 것을 truncate
-    // 선점한 빈 파일이므로 아래에서 truncate 안 함
-    let mut tmp_path = match reserve_tmp(&out_path) {
-        Ok(p) => p,
-        Err(e) => return CreateResult::Failed(e),
+    // 선점한 빈 파일이므로 아래에서 truncate 안 함, 분할은 VolumeSet 이 볼륨마다 선점
+    // 경로 재개방 금지 — 그 사이 경로 삭제나 링크 전환 시 엉뚱한 대상 포착
+    let (tmp_path, sink) = match opts.volume {
+        None => {
+            let mut t = match reserve_tmp(&out_path) {
+                Ok(p) => p,
+                Err(e) => return CreateResult::Failed(e),
+            };
+            let Some(file) = t.take_file() else {
+                return CreateResult::Failed(ZipManiaError::new(
+                    "output_error",
+                    "임시 파일 핸들을 얻지 못했습니다.",
+                ));
+            };
+            (Some(t), OutSink::File(file))
+        }
+        Some(size) => match VolumeSet::new(&out_path, size) {
+            Ok(v) => (None, OutSink::Volumes(v)),
+            Err(e) => return CreateResult::Failed(e),
+        },
     };
     let total: u64 = items.iter().map(|i| i.size).sum();
 
-    // 경로 재개방 금지 — 그 사이 경로 삭제나 링크 전환 시 엉뚱한 대상 포착
-    let Some(file) = tmp_path.take_file() else {
-        return CreateResult::Failed(ZipManiaError::new(
-            "output_error",
-            "임시 파일 핸들을 얻지 못했습니다.",
-        ));
-    };
-    let mut zw = ZipWriter::new(BufWriter::with_capacity(READ_BUF, file));
+    let mut zw = ZipWriter::new(BufWriter::with_capacity(READ_BUF, sink));
     let mut done = 0u64;
     let mut buf = vec![0u8; READ_BUF];
 
@@ -203,7 +219,7 @@ pub fn do_create(
             if let Some(p) = $pipe.take() {
                 p.stop();
             }
-            abort(&tmp_path);
+            abort_out(tmp_path.as_ref());
             return $ret;
         }};
     }
@@ -343,24 +359,43 @@ pub fn do_create(
         p.stop();
     }
 
-    match zw.finish() {
+    let sink = match zw.finish() {
         Ok(mut w) => {
             if let Err(e) = w.flush() {
-                abort(&tmp_path);
+                abort_out(tmp_path.as_ref());
                 return CreateResult::Failed(ZipManiaError::new(
                     "output_error",
                     format!("압축을 마무리하지 못했습니다: {e}"),
                 ));
             }
+            match w.into_inner() {
+                Ok(s) => s,
+                Err(e) => {
+                    abort_out(tmp_path.as_ref());
+                    return CreateResult::Failed(ZipManiaError::new(
+                        "output_error",
+                        format!("압축을 마무리하지 못했습니다: {e}"),
+                    ));
+                }
+            }
         }
         Err(e) => {
-            abort(&tmp_path);
+            abort_out(tmp_path.as_ref());
             return CreateResult::Failed(super::map_err(e, false));
         }
-    }
+    };
 
     // TmpPath::commit 사용, commit_replace 직접 호출 시 committed 미설정 → Drop 이 재삭제 시도
-    if let Err(e) = tmp_path.commit() {
+    // Windows = 열린 핸들 rename 불가, 단일 파일은 핸들 먼저 드롭
+    let committed = match (tmp_path, sink) {
+        (Some(t), OutSink::File(f)) => {
+            drop(f);
+            t.commit()
+        }
+        (None, OutSink::Volumes(v)) => v.commit().map(|_| ()),
+        _ => Err(ZipManiaError::new("output_error", "산출 자리가 어긋났습니다.")),
+    };
+    if let Err(e) = committed {
         return CreateResult::Failed(e);
     }
     on_progress(Progress::finished(total));

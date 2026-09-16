@@ -22,7 +22,7 @@ use crate::error::{self, ZipManiaError};
 use crate::models::{ArchiveEntry, ScanEntry, TestEntry};
 
 use callbacks::{ExtractCfg, ProgressSink, ScanFn, UpdateCfg, UpdateItem};
-use crate::outfile::reserve_tmp;
+use crate::outfile::{reserve_tmp, VolumeSet};
 use com::*;
 use ffi::Dll;
 
@@ -274,6 +274,13 @@ unsafe fn collect_meta_checked(
 /// 이름 없는 항목(.bz2/.xz/.z) → 아카이브 파일명에서 유도
 /// tar 별칭(.tgz/.tbz2/.txz) = .tar 부착, 백업.tgz → 백업.tar, 원본.txt.bz2 → 원본.txt
 fn derived_entry_name(archive: &str) -> String {
+    // 분할이면 .001 을 뗀 이름 기준
+    let split = crate::volumes::split_base(Path::new(archive));
+    let archive = split
+        .as_ref()
+        .map(|b| b.to_string_lossy().to_string())
+        .unwrap_or_else(|| archive.to_string());
+    let archive = archive.as_str();
     let p = Path::new(archive);
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
     if stem.is_empty() {
@@ -326,14 +333,23 @@ impl SevenZip {
 }
 
 /// 읽기용 열기, 포맷 후보 순회, 암호 요청된 실패는 즉시 분류
+/// <대상>.001 = 볼륨 이어 읽기, 후보는 대상 확장자(Split 핸들러 미사용)
 fn open_for_read(dll: &Dll, archive: &str, password: Option<&str>) -> Result<IInArchive, ZipManiaError> {
     let mut last_hr = 0i32;
-    for id in candidate_ids(archive) {
+    let split = crate::volumes::split_base(Path::new(archive));
+    let cand = match &split {
+        Some(base) => candidate_ids(&base.to_string_lossy()),
+        None => candidate_ids(archive),
+    };
+    for id in cand {
         let arc = match dll.create_in_archive(id) {
             Ok(a) => a,
             Err(_) => continue,
         };
-        let stream = streams::open_input_file(Path::new(archive))?;
+        let stream = match &split {
+            Some(_) => streams::open_input_volumes(Path::new(archive))?,
+            None => streams::open_input_file(Path::new(archive))?,
+        };
         let (open_cb, crypto) = callbacks::make_open_cb(password);
         let max_check: u64 = 1 << 23;
         let hr = unsafe { arc.Open(stream.as_raw(), &max_check, open_cb.as_raw()) };
@@ -546,10 +562,16 @@ fn do_create(
 
     // 기존 파일 선삭제 금지, 임시 파일 완성 후 이동
     let out_path = PathBuf::from(&opts.output);
-    // 독점 생성으로 자리 선점, 이름만 생성 금지
-    let mut tmp_path = match reserve_tmp(&out_path) {
-        Ok(p) => p,
-        Err(e) => return CreateResult::Failed(e),
+    // 독점 생성으로 자리 선점, 이름만 생성 금지, 분할이면 VolumeSet 이 볼륨마다 선점
+    let mut out_sink = match opts.volume {
+        None => match reserve_tmp(&out_path) {
+            Ok(p) => CreateSink::Single(p),
+            Err(e) => return CreateResult::Failed(e),
+        },
+        Some(size) => match VolumeSet::new(&out_path, size) {
+            Ok(v) => CreateSink::Split(Arc::new(Mutex::new(v))),
+            Err(e) => return CreateResult::Failed(e),
+        },
     };
 
     let dll = match sz.load() {
@@ -570,8 +592,8 @@ fn do_create(
             .unwrap_or(false);
     let header_enc = use_password && opts.encrypt_names && opts.format.supports_header_encryption();
 
-    // 옵션 설정: 압축 레벨 "x", 헤더암호 "he"
-    if opts.format.has_level() || header_enc {
+    // 옵션 설정: 압축 레벨 "x", 헤더암호 "he", 스레드 "mt"
+    if opts.format.has_level() || header_enc || opts.threads.is_some() {
         let setp: ISetProperties = match out_arc.cast() {
             Ok(s) => s,
             Err(e) => {
@@ -595,6 +617,12 @@ fn do_create(
             pv.set_bool(true);
             values.push(pv);
         }
+        if let Some(t) = opts.threads {
+            names.push(ffi::to_wide_nul("mt"));
+            let mut pv = prop::PropVariant::empty();
+            pv.set_u32(t.max(1));
+            values.push(pv);
+        }
         let name_ptrs: Vec<*const u16> = names.iter().map(|n| n.as_ptr()).collect();
         let hr = unsafe {
             setp.SetProperties(name_ptrs.as_ptr(), values.as_ptr(), values.len() as u32)
@@ -608,15 +636,20 @@ fn do_create(
     }
 
     // 경로로 재개방 금지, 만든 핸들 그대로 전달
-    let Some(tmp_file) = tmp_path.take_file() else {
-        return CreateResult::Failed(ZipManiaError::new(
-            "output_error",
-            "임시 파일 핸들을 얻지 못했습니다.",
-        ));
-    };
-    let out_stream = match streams::output_seekable_file(tmp_file) {
-        Ok(s) => s,
-        Err(e) => return CreateResult::Failed(e),
+    let out_stream = match &mut out_sink {
+        CreateSink::Single(tmp_path) => {
+            let Some(tmp_file) = tmp_path.take_file() else {
+                return CreateResult::Failed(ZipManiaError::new(
+                    "output_error",
+                    "임시 파일 핸들을 얻지 못했습니다.",
+                ));
+            };
+            match streams::output_seekable_file(tmp_file) {
+                Ok(s) => s,
+                Err(e) => return CreateResult::Failed(e),
+            }
+        }
+        CreateSink::Split(v) => streams::output_volumes(v.clone()),
     };
 
     let num = items.len() as u32;
@@ -638,14 +671,13 @@ fn do_create(
     drop(cb);
     drop(out_arc);
 
+    // 취소, 실패 = out_sink Drop 이 임시 파일(볼륨 전부) 정리
     if shared.aborted.load(std::sync::atomic::Ordering::SeqCst) {
-        let _ = std::fs::remove_file(&tmp_path);
         return CreateResult::canceled();
     }
 
     let op = *shared.op_result.lock().unwrap();
     if hr != S_OK || op != 0 {
-        let _ = std::fs::remove_file(&tmp_path);
         if op != 0 {
             return CreateResult::Failed(error::classify_operation(
                 op,
@@ -653,17 +685,48 @@ fn do_create(
                 opts.password.is_some(),
             ));
         }
+        // 분할 쓰기 오류는 dll 이 E_FAIL 로만 알리므로 원문을 writer 에서 회수
+        if let CreateSink::Split(v) = &out_sink {
+            if let Some(msg) = v.lock().unwrap().take_error() {
+                return CreateResult::Failed(ZipManiaError::new(
+                    "output_error",
+                    format!("산출물을 쓰지 못했습니다: {msg}"),
+                ));
+            }
+        }
         return CreateResult::Failed(ZipManiaError::new(
             "engine_error",
             format!("압축에 실패했습니다(hr=0x{:08X}).", hr.0),
         ));
     }
     // TmpPath::commit 필수, commit_replace 직접 호출 금지
-    if let Err(e) = tmp_path.commit() {
+    if let Err(e) = out_sink.commit() {
         return CreateResult::Failed(e);
     }
     // 담지 못한 항목 있으면 ok 아님
     CreateResult::finish(skipped)
+}
+
+/// 생성 산출 자리, 단일 = 임시 파일 1개, 분할 = VolumeSet(스트림과 Arc 공유)
+enum CreateSink {
+    Single(crate::outfile::TmpPath),
+    Split(Arc<Mutex<VolumeSet>>),
+}
+
+impl CreateSink {
+    /// 스트림 드롭 뒤 호출 필수(Arc 회수), 분할은 볼륨 일괄 이동
+    fn commit(self) -> Result<(), ZipManiaError> {
+        match self {
+            CreateSink::Single(t) => t.commit(),
+            CreateSink::Split(v) => match Arc::try_unwrap(v) {
+                Ok(m) => m.into_inner().unwrap().commit().map(|_| ()),
+                Err(_) => Err(ZipManiaError::new(
+                    "output_error",
+                    "분할 산출물이 아직 사용 중입니다.",
+                )),
+            },
+        }
+    }
 }
 
 /// 아카이브 편집, IInArchive → 같은 핸들러 IOutArchive 캐스팅 → UpdateItems
@@ -694,6 +757,13 @@ fn do_edit(
         Ok(d) => d,
         Err(e) => return CreateResult::Failed(e),
     };
+    // 분할본 편집 미지원, 출력 자리가 .001 하나가 됨
+    if crate::volumes::split_base(Path::new(&opts.archive)).is_some() {
+        return CreateResult::Failed(ZipManiaError::new(
+            "unsupported",
+            "분할 아카이브는 편집할 수 없습니다.",
+        ));
+    }
     let password = opts.password.as_deref();
     let in_arc = match open_for_read(&dll, &opts.archive, password) {
         Ok(a) => a,
@@ -1887,6 +1957,8 @@ mod integration_tests {
             level,
             password: pw.map(|s| s.to_string()),
             encrypt_names: enc,
+            volume: None,
+            threads: None,
         }
     }
     fn create(out: &Path, inputs: &[String], fmt: CompressFormat, level: u8, pw: Option<&str>, enc: bool) -> CreateResult {
@@ -1924,6 +1996,99 @@ mod integration_tests {
         // 내용 왕복(메모리 읽기)
         let bytes = backend().read_entry_to_memory(out.to_str().unwrap(), "한글문서.txt", None).unwrap();
         assert_eq!(bytes, "안녕하세요 ZipMania".as_bytes());
+    }
+
+    /// 분할 생성, 7z, zip 양쪽, 산출 = .001.., 7z.exe 가 .001 로 풀고 DLL 이 목록을 읽는다
+    /// 볼륨 크기가 산출물보다 크면 분할 없이 대상 이름 하나
+    #[test]
+    fn 분할_생성은_7z_exe_가_푼다() {
+        let td = TempDir::new("cr_split");
+        // 압축되지 않는 입력 300KiB(레벨 0 도 겸함)
+        let mut noise = vec![0u8; 300 * 1024];
+        let mut x: u32 = 0x9E37_79B9;
+        for b in noise.iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *b = x as u8;
+        }
+        fs::write(td.path.join("잡음.bin"), &noise).unwrap();
+        let inputs = vec![td.path.join("잡음.bin").to_str().unwrap().to_string()];
+
+        for (fmt, name) in [(CompressFormat::SevenZip, "out.7z"), (CompressFormat::Zip, "out.zip")] {
+            let out = td.path.join(name);
+            let mut opts = create_opts(&out, &inputs, fmt, 0, None, false);
+            opts.volume = Some(64 * 1024);
+            let cancel = Arc::new(AtomicBool::new(false));
+            let r = if fmt == CompressFormat::Zip {
+                crate::backend::unzip::Unzip::new().create(&opts, &mut |_p| {}, cancel)
+            } else {
+                backend().create(&opts, &mut |_p| {}, cancel)
+            };
+            match r {
+                CreateResult::Done { status, .. } => assert_eq!(status, "ok", "{name}"),
+                CreateResult::Failed(e) => panic!("{name} 분할 압축 실패: {e:?}"),
+            }
+            assert!(!out.exists(), "{name}: 분할인데 통짜 파일이 생겼다");
+            let v1 = crate::volumes::volume_name(&out, 1);
+            assert!(v1.exists(), "{name}: .001 이 없다");
+            assert!(crate::volumes::volume_name(&out, 5).exists(), "{name}: 볼륨 수가 모자란다");
+            assert!(!crate::volumes::volume_name(&out, 6).exists(), "{name}: 볼륨이 많다");
+            let last = fs::metadata(crate::volumes::volume_name(&out, 4)).unwrap().len();
+            assert_eq!(last, 64 * 1024, "{name}: 중간 볼륨 크기가 다르다");
+
+            // 7z.exe 교차검증(.001 로 열기)
+            assert!(exe_test(&v1, None), "{name}: 7z.exe t 가 분할본을 거부");
+            // DLL 목록(Split 핸들러 → 안의 아카이브)
+            let entries = backend().list(v1.to_str().unwrap(), None).expect("분할본 목록 실패");
+            assert!(entries.iter().any(|e| e.path == "잡음.bin"), "{name}: {entries:?}");
+            // 내용 왕복
+            let dest = td.path.join(format!("dest_{name}"));
+            fs::create_dir_all(&dest).unwrap();
+            let r = backend().extract(
+                &extract_opts(&v1, &dest, true, OverwriteMode::Overwrite),
+                &mut |_p| {},
+                Arc::new(AtomicBool::new(false)),
+            );
+            assert!(matches!(r, ExtractResult::Done { status: "ok", .. }), "{name}: 해제 실패");
+            assert_eq!(fs::read(dest.join("잡음.bin")).unwrap(), noise, "{name}: 내용이 다르다");
+
+            // 임시 파일 잔류 없음
+            assert!(
+                fs::read_dir(&td.path).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains(".zmtmp-")),
+                "{name}: 임시 파일이 남았다"
+            );
+        }
+
+        // 볼륨이 산출물보다 크면 분할 없음
+        let out = td.path.join("one.7z");
+        let mut opts = create_opts(&out, &inputs, CompressFormat::SevenZip, 0, None, false);
+        opts.volume = Some(4 << 30);
+        let r = backend().create(&opts, &mut |_p| {}, Arc::new(AtomicBool::new(false)));
+        assert!(matches!(r, CreateResult::Done { status: "ok", .. }));
+        assert!(out.exists());
+        assert!(!crate::volumes::volume_name(&out, 1).exists());
+
+        // 장애 주입, 볼륨을 만들 수 없는 자리(없는 폴더) → engine_error 가 아니라 writer 원문
+        let bad = td.path.join("없는폴더").join("x.7z");
+        let mut opts = create_opts(&bad, &inputs, CompressFormat::SevenZip, 0, None, false);
+        opts.volume = Some(64 * 1024);
+        match backend().create(&opts, &mut |_p| {}, Arc::new(AtomicBool::new(false))) {
+            CreateResult::Failed(e) => {
+                assert_eq!(e.code, "output_error", "{e:?}");
+                assert!(e.message.contains("임시 파일"), "{e:?}");
+            }
+            CreateResult::Done { .. } => panic!("없는 폴더에 성공했다"),
+        }
+
+        // 반대 방향, 7z.exe 가 만든 분할본을 우리가 읽는다
+        mk_fixture(&td.path, &["-v64k", "-mx0"], "exe.7z", &["잡음.bin"]);
+        let v1 = crate::volumes::volume_name(&td.path.join("exe.7z"), 1);
+        assert!(v1.exists());
+        let entries = backend().list(v1.to_str().unwrap(), None).expect("7z.exe 분할본 목록 실패");
+        assert!(entries.iter().any(|e| e.path == "잡음.bin"));
+        let bytes = backend().read_entry_to_memory(v1.to_str().unwrap(), "잡음.bin", None).unwrap();
+        assert_eq!(bytes, noise);
     }
 
     #[test]
@@ -2063,6 +2228,8 @@ mod integration_tests {
                 level: 9,
                 password: None,
                 encrypt_names: false,
+                volume: None,
+                threads: None,
             };
             backend().create(&opts, &mut move |_p| {
                 started_cb.store(true, Ordering::SeqCst);
@@ -2097,6 +2264,8 @@ mod integration_tests {
             level: 5,
             password: None,
             encrypt_names: false,
+            volume: None,
+            threads: None,
         };
         // 없는 DLL → sz.load() 실패
         let broken = SevenZip::new(td.path.join("없는7z.dll"));
@@ -2151,6 +2320,8 @@ mod integration_tests {
                 level: 9,
                 password: None,
                 encrypt_names: false,
+                volume: None,
+                threads: None,
             };
             backend().create(
                 &opts,
@@ -2259,6 +2430,8 @@ mod integration_tests {
             level: 1,
             password: None,
             encrypt_names: false,
+            volume: None,
+            threads: None,
         };
         let mut prog = |_p: Progress| {};
         match backend().create(&opts, &mut prog, Arc::new(AtomicBool::new(false))) {
@@ -2299,6 +2472,8 @@ mod integration_tests {
             level: 1,
             password: None,
             encrypt_names: false,
+            volume: None,
+            threads: None,
         };
         let mut prog = |_p: Progress| {};
         // 링크 추적 시 미종료 또는 외부 파일 유입

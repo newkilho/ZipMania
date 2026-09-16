@@ -9,6 +9,8 @@ export const FORM_DEFAULTS = {
   encryptNames: false,
   eachMode: false,
   showPasswordPanel: false,
+  volume: 0,
+  volumeText: "",
 };
 
 /** 배열이 아닌 값(누락, null)도 빈 배열로 받는다, */
