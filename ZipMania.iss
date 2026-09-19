@@ -20,6 +20,7 @@
 
 [Files]
 Source: "{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySrcDir}\zm.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySrcDir}\7z.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySrcDir}{#MyShellSub}\ZipManiaShell.msix"; DestDir: "{app}{#MyShellSub}"; Flags: ignoreversion
 Source: "{#MyShellDll}"; DestDir: "{app}{#MyShellSub}"; Flags: ignoreversion; Check: ShouldInstallShellDll

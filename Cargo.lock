@@ -5436,7 +5436,7 @@ dependencies = [
 
 [[package]]
 name = "zipmania"
-version = "0.9.6"
+version = "0.9.8"
 dependencies = [
  "base64 0.22.1",
  "klib-dialog",
@@ -5481,6 +5481,13 @@ name = "zlib-rs"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34b31d188d9d685a4f9c7b46d6e36631b07058d2cfe190267adce54dc230bf12"
+
+[[package]]
+name = "zm"
+version = "0.9.8"
+dependencies = [
+ "tauri-winres",
+]
 
 [[package]]
 name = "zmij"

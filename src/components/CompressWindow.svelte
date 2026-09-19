@@ -29,6 +29,8 @@
     emitSettingsChanged,
     resizeCurrentWindow,
     setCurrentWindowTitle,
+    verifyArchive,
+    deletePaths,
   } from "../lib/api.js";
   import { formatSize, missingLines, missingLogLines } from "../lib/format.js";
   import { newMeter, sample } from "../lib/progress.js";
@@ -66,6 +68,10 @@
   let encryptNames = false;
   let volume = FORM_DEFAULTS.volume; // 분할 셀렉트 값(0 = 없음, SPLIT_CUSTOM = 직접 입력, 그 외 바이트)
   let volumeText = FORM_DEFAULTS.volumeText; // 직접 입력 문자열
+  let verifyAfter = FORM_DEFAULTS.verifyAfter; // 압축 후 무결성 검사
+  let deleteAfter = FORM_DEFAULTS.deleteAfter; // 검사(있다면)까지 통과하면 원본 삭제
+  let doneInputs = []; // 방금 압축한 입력, [원본 삭제] 대상
+  let donePassword = ""; // 방금 압축한 암호, 검사에 필요
   let outputSuggested = false; // 출력 경로 자동 제안을 1회만 하기 위한 플래그
 
   // 완료 후 동작 — 해제 창과 같은 두 가지, 설정에 기억
@@ -287,6 +293,8 @@
     showPasswordPanel = FORM_DEFAULTS.showPasswordPanel;
     volume = FORM_DEFAULTS.volume;
     volumeText = FORM_DEFAULTS.volumeText;
+    verifyAfter = FORM_DEFAULTS.verifyAfter;
+    deleteAfter = FORM_DEFAULTS.deleteAfter;
   }
 
   /**
@@ -320,6 +328,23 @@
     setOutput: (out) => {
       output = out;
       outputSuggested = true; // 자동 제안이 덮어쓰지 않게
+    },
+    // 명령줄 옵션, 레벨은 선택지 중 가장 가까운 것, 분할은 프리셋이면 그것 아니면 직접 입력 칸
+    setOptions: (o) => {
+      if (o.level !== null) {
+        level = LEVELS.reduce((best, l) => (Math.abs(l.value - o.level) < Math.abs(best - o.level) ? l.value : best), LEVELS[0].value);
+      }
+      if (o.password !== null) {
+        password = o.password;
+        showPasswordPanel = true;
+      }
+      if (o.volume !== null) {
+        const preset = SPLIT_PRESETS.find((p) => p.bytes === o.volume);
+        volume = preset ? preset.bytes : SPLIT_CUSTOM;
+        volumeText = preset ? "" : String(o.volume);
+      }
+      verifyAfter = o.verify;
+      deleteAfter = o.deleteSources;
     },
     addInputs: (paths) => addInputs(paths),
     settle: () => tick(),
@@ -365,8 +390,10 @@
     failedCount += d.missingTotal || (d.missing ? d.missing.length : 0);
     // 배치("각각 압축"): 다음 원본으로 넘어가거나, 마지막이면 완료
     if (batchMode && d.status !== "canceled") {
+      let status = d.status;
+      if (status === "ok") status = (await postProcess()).status;
         // ok 아닌 것은 전부 흠집, warning 을 세지 않으면 마지막 항목의 성공이 덮는다
-      batchIssue = batchIssueAfter(batchIssue, d.status);
+      batchIssue = batchIssueAfter(batchIssue, status);
       if (batchIndex < batchItems.length - 1) {
         batchIndex++;
         runCompressItem();
@@ -383,19 +410,65 @@
       await afterDone(!batchIssue);
       return;
     }
-    phase = "done";
     finishProgress();
     // 성공 시 진행률 100 마감, 작은 아카이브는 진행률 콜백이 한 번도 오지 않는다
     if (d.status !== "canceled") jobPercent = 100;
     // 완료/취소 메시지 = 상태 기반 번역, 빠진 항목이 있으면 그 요약
     const tr = get(t);
     const missing = missingLines(tr, d.missing, d.missingTotal);
-    const msg =
-      d.status === "canceled"
+    let status = d.status;
+    let msg =
+      status === "canceled"
         ? tr("compress.doneCanceled")
         : missing[0] || tr("compress.doneOk");
-    jobResult = { status: d.status, message: msg };
-    await afterDone(d.status === "ok");
+    // 압축 후 검사, 원본 삭제는 전부 담겼을 때만(ok), 진행 화면을 유지한 채 돈다
+    if (status === "ok") {
+      const post = await postProcess();
+      if (post.status !== "ok") {
+        status = post.status;
+        msg = post.message;
+      }
+    }
+    phase = "done";
+    jobResult = { status, message: msg };
+    await afterDone(status === "ok");
+  }
+
+  /**
+   * 압축 후 검사, 원본 삭제(폼 옵션), 대상 = doneTarget, 원본 = doneInputs
+   * 검사 실패면 지우지 않음, 반환 = { status: ok|warning, message }
+   */
+  async function postProcess() {
+    const tr = get(t);
+    if (!verifyAfter && !deleteAfter) return { status: "ok", message: "" };
+    if (verifyAfter) {
+      jobFile = tr("log.verifying");
+      pushLog(tr("log.verifying"));
+      try {
+        await verifyArchive(doneTarget, donePassword);
+        pushLog(tr("log.verifyOk"));
+      } catch (e) {
+        const why = errText(tr, e && e.code, e && e.message);
+        pushLog(`${tr("log.verifyFailed")} ${why}`);
+        jobFile = "";
+        return { status: "warning", message: `${tr("log.verifyFailed")} ${why}` };
+      }
+      jobFile = "";
+    }
+    if (deleteAfter) {
+      let failed = [];
+      try {
+        failed = await deletePaths(doneInputs);
+      } catch (e) {
+        failed = [errText(tr, e && e.code, e && e.message)];
+      }
+      if (failed.length > 0) {
+        for (const f of failed) pushLog(`${tr("log.deleteFailed")} ${f}`);
+        return { status: "warning", message: `${tr("log.deleteFailed")} ${failed[0]}` };
+      }
+      pushLog(tr("log.sourcesDeleted", { count: doneInputs.length }));
+    }
+    return { status: "ok", message: "" };
   }
 
   /** 완료 후 동작 처리 — 성공일 때만, 미뤄 둔 요청이 자동 닫기보다 먼저다 */
@@ -445,6 +518,8 @@
       jobId = id;
       doneTarget = item.output;
       doneFolder = parentDirOf(item.output);
+      doneInputs = [item.input];
+      donePassword = supportsPassword ? password : "";
       jobPercent = 0;
       jobFile = fileNameOf(item.input);
       pushLog(
@@ -912,6 +987,8 @@
       jobId = id;
       doneTarget = req.output;
       doneFolder = parentDirOf(req.output);
+      doneInputs = req.inputs;
+      donePassword = req.password;
       // job 등록 순간 starting 해제, 유지 시 busy 가 안 내려가 미뤄 둔 요청 영구 잔존
       starting = false;
       jobPercent = 0;
@@ -1091,6 +1168,21 @@
                 title={$t("compress.splitCustomTitle")}
               />
             {/if}
+          </div>
+        </div>
+
+        <!-- 압축 후 검사, 원본 삭제(검사가 켜져 있으면 통과했을 때만) -->
+        <div class="row">
+          <span class="lb">{$t("compress.after")}</span>
+          <div class="grow inline">
+            <label class="check pw-check">
+              <input type="checkbox" bind:checked={verifyAfter} />
+              {$t("compress.verifyAfter")}
+            </label>
+            <label class="check pw-check" title={$t("compress.deleteAfterTitle")}>
+              <input type="checkbox" bind:checked={deleteAfter} />
+              {$t("compress.deleteAfter")}
+            </label>
           </div>
         </div>
 

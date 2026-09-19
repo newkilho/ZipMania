@@ -1334,8 +1334,14 @@ pub async fn open_compress_window(
             output,
             auto_start: auto_start.unwrap_or(false),
             batch: batch.unwrap_or_default(),
+            ..Default::default()
         }),
     )
+}
+
+/// 명령줄(ZipMania.exe c ...)의 요청, 옵션이 다 찬 launch 를 그대로 큐에
+pub(crate) fn open_compress_launch(app: tauri::AppHandle, launch: CompressLaunch) -> Result<(), String> {
+    open_compress_window_inner(app, Some(launch))
 }
 
 /// open_compress_window 본체, launch 없으면 창만 연다(죽은 창의 잔여 요청 인계용)
@@ -1701,6 +1707,7 @@ pub async fn open_extract_window(
     dest: Option<String>,
     auto_start: Option<bool>,
     batch: Option<Vec<ExtractBatchItem>>,
+    flatten: Option<bool>,
 ) -> Result<(), String> {
     let main_window = app.get_webview_window("main");
 
@@ -1714,6 +1721,7 @@ pub async fn open_extract_window(
             auto_start: auto_start.unwrap_or(false),
             dest,
             batch: batch.unwrap_or_default(),
+            flatten: flatten.unwrap_or(false),
         });
     }
 
@@ -1927,6 +1935,51 @@ pub fn take_extract_context(
 #[tauri::command]
 pub fn delete_file(path: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| format!("파일을 삭제하지 못했습니다: {e}"))
+}
+
+/// 압축 입력 삭제(파일 또는 폴더 통째), 반환 = (경로, 결과), 콘솔 -delsrc 와 압축 창 [원본 삭제] 공용
+pub(crate) fn remove_paths(paths: &[String]) -> Vec<(String, std::io::Result<()>)> {
+    paths
+        .iter()
+        .map(|p| {
+            let path = std::path::Path::new(p);
+            let r = if path.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            };
+            (p.clone(), r)
+        })
+        .collect()
+}
+
+/// 압축 창 [압축 후 원본 삭제], 반환 = 지우지 못한 경로("경로: 오류")
+#[tauri::command]
+pub fn delete_paths(paths: Vec<String>) -> Vec<String> {
+    remove_paths(&paths)
+        .into_iter()
+        .filter_map(|(p, r)| r.err().map(|e| format!("{p}: {e}")))
+        .collect()
+}
+
+/// 압축 창 [압축 후 검사], 콘솔 -testdst 와 같은 backend.test, 작업 등록 없음(쓰기 없음)
+#[tauri::command]
+pub async fn verify_archive(archive: String, password: Option<String>) -> Result<(), ZipManiaError> {
+    let dll = sevenzip_dll_file()?;
+    // 분할 세트 = name.7z 없음, name.7z.001 부터
+    let archive = {
+        let p = std::path::Path::new(&archive);
+        if p.exists() {
+            archive
+        } else {
+            zipmania_archive::volumes::volume_name(p, 1).to_string_lossy().to_string()
+        }
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        Router::new(dll).for_archive(&archive).test(&archive, password.as_deref())
+    })
+    .await
+    .map_err(|e| ZipManiaError::new("io_error", format!("검사 스레드 실패: {e}")))?
 }
 
 /// 폴더를 탐색기로 열기, [대상 폴더 열기] 용
@@ -2473,7 +2526,7 @@ mod compress_queue_tests {
             format: Some("zip".to_string()),
             output: Some(format!("C:/{name}.zip")),
             auto_start: true,
-            batch: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -2651,6 +2704,7 @@ mod compress_queue_tests {
                 input: "C:/x.txt".into(),
                 output: "C:/x.zip".into(),
             }],
+            ..Default::default()
         });
         q.push(launch("plain"));
 

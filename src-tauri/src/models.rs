@@ -70,6 +70,8 @@ pub struct ExtractContext {
     pub dest: Option<String>,
     #[serde(default)]
     pub batch: Vec<ExtractBatchItem>,
+    #[serde(default)]
+    pub flatten: bool,
 }
 
 /// "각각 풀기" 배치의 항목 하나(아카이브 → 최종 대상 폴더)
@@ -81,6 +83,7 @@ pub struct ExtractBatchItem {
 }
 
 /// 압축 창 초기 컨텍스트(take_compress_inputs 반환), 일반 = inputs 만, 즉시 zip = format, output, auto_start 까지
+/// level, password, volume, verify, delete_sources = 명령줄(ZipMania.exe c ...) 전용, None/false = 폼 기본값
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompressLaunch {
@@ -90,6 +93,16 @@ pub struct CompressLaunch {
     pub auto_start: bool,
     #[serde(default)]
     pub batch: Vec<CompressBatchItem>,
+    #[serde(default)]
+    pub level: Option<u8>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub volume: Option<u64>,
+    #[serde(default)]
+    pub verify: bool,
+    #[serde(default)]
+    pub delete_sources: bool,
 }
 
 /// lease_compress_launch 반환값, 요청 1개 + more(잔여 여부), more 부재 시 뒤엣것이 큐에 잔류(D3.5)

@@ -71,6 +71,7 @@
   let scope = "all"; // 'all' | 'selected'
   let createSubfolder = true; // 대상 폴더 하위에 '압축파일명' 폴더 생성
   let deleteAfter = false; // 성공 후 압축 파일 삭제
+  let flatten = false; // 경로 없이 풀기(명령줄 e), 컨텍스트로만 켜짐
 
   // "각각 풀기" 배치: 각 아카이브를 자기 대상 폴더로 순차 해제
   let batchMode = false;
@@ -274,6 +275,7 @@
       if (ctx) {
         archive = ctx.archive || "";
         selectedInner = Array.isArray(ctx.selected) ? ctx.selected : [];
+        flatten = ctx.flatten === true;
         const batch = Array.isArray(ctx.batch) ? ctx.batch : [];
         if (batch.length > 0) {
           // "각각 풀기": 아카이브마다 순차 배치 해제
@@ -497,7 +499,7 @@
       checked = await checkConflicts({
         archive,
         dest: finalDest,
-        keepPaths: true,
+        keepPaths: !flatten,
         selected: currentSelected(),
         password: password || undefined,
       });
@@ -612,7 +614,7 @@
         archive,
         dest: finalDest,
         selected: currentSelected(),
-        keepPaths: true,
+        keepPaths: !flatten,
         overwrite,
         // 충돌 창의 파일별 선택(존재 시), 기본 정책보다 우선
         decisions,

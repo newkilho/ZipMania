@@ -43,7 +43,8 @@ fn egg_목록() {
     assert_eq!(e.size, UNPACKED_SIZE);
     assert_eq!(e.packed_size, PACKED_SIZE);
     assert_eq!(e.crc.as_deref(), Some(CRC));
-    assert_eq!(e.modified, MTIME); // FILETIME 경로
+    // FILETIME 경로 = UTC → 컴퓨터 시간대, MTIME 은 UTC 표기(2016-09-19 14:34:06 = unix 1474295646)
+    assert_eq!(e.modified, zipmania_archive::times::unix_to_local_string(1_474_295_646));
     assert!(!e.is_dir);
 }
 

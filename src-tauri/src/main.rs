@@ -6,6 +6,7 @@ mod assoc_icon;
 mod assoc_picker;
 mod cli;
 mod cmdline;
+mod console;
 mod commands;
 mod except;
 mod jobs;
@@ -38,7 +39,7 @@ fn main() {
     if let Some(code) = maintenance::run(&argv) {
         std::process::exit(code);
     }
-    // 콘솔 압축(c ...) 도 같은 자리, 창, single-instance 어느 것도 뜨지 않음
+    // zm 경유 콘솔 명령도 같은 자리, 창, single-instance 어느 것도 뜨지 않음, ZipMania.exe 직접의 동사는 cli.rs → 창
     if let Some(code) = cmdline::run(&argv) {
         std::process::exit(code);
     }
@@ -179,6 +180,8 @@ fn main() {
             commands::open_archive_window,
             commands::take_viewer_archive,
             commands::delete_file,
+            commands::delete_paths,
+            commands::verify_archive,
             commands::open_folder,
             commands::open_entry,
             commands::open_default_apps,

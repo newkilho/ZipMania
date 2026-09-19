@@ -23,6 +23,10 @@ impl CliMode {
 
 /// argv 가 기능 창 셸 실행인가(--open, 일반 실행 = false)
 pub fn is_function_launch(argv: &[String]) -> bool {
+    // 명령줄 동사 = 압축, 해제는 기능 창, 목록, 검사는 메인 창
+    if let Some(Ok(cmd)) = crate::cmdline::parse(argv) {
+        return !matches!(cmd.verb, crate::cmdline::Verb::List | crate::cmdline::Verb::Test);
+    }
     match parse(argv) {
         Some((v, paths)) if !paths.is_empty() => matches!(
             v,
@@ -76,18 +80,22 @@ impl Verb {
     }
 }
 
-/// argv → (동작, 경로들), 스위치 뒤 비-플래그 인자가 경로, 없으면 None
+/// argv → (동작, 경로들), 스위치 뒤 비-플래그 인자가 경로, 스위치 없는 경로만 = Open(exe 에 파일을 끌어다 놓기), 없으면 None
 pub fn parse(argv: &[String]) -> Option<(Verb, Vec<String>)> {
     let mut verb = None;
     let mut paths = Vec::new();
     for a in argv.iter().skip(1) {
         if let Some(v) = Verb::from_switch(a) {
             verb = Some(v);
-        } else if verb.is_some() && !a.starts_with("--") {
+        } else if !a.starts_with("--") && (verb.is_some() || !a.starts_with('-')) {
             paths.push(a.clone());
         }
     }
-    verb.map(|v| (v, paths))
+    match verb {
+        Some(v) => Some((v, paths)),
+        None if !paths.is_empty() => Some((Verb::Open, paths)),
+        None => None,
+    }
 }
 
 /// 취합 버퍼(managed state), 동작별 경로 수집 + 세대 카운터로 디바운스 판정
@@ -112,8 +120,22 @@ pub fn handle(app: &AppHandle, argv: Vec<String>) {
     handle_inner(app, argv, false);
 }
 
-/// argv 1개 처리, 파싱 → 버퍼링 → 디바운스 예약
+/// argv 1개 처리, 파싱 → 버퍼링 → 디바운스 예약, 명령줄 동사(c x ...)는 취합 없이 곧바로 창
 fn handle_inner(app: &AppHandle, argv: Vec<String>, startup: bool) {
+    match crate::cmdline::parse(&argv) {
+        Some(Ok(cmd)) => {
+            crate::cmdline::launch_gui(app, cmd, startup);
+            return;
+        }
+        Some(Err(e)) => {
+            crate::cmdline::gui_error(&e);
+            if !startup {
+                focus_main(app);
+            }
+            return;
+        }
+        None => {}
+    }
     let Some((verb, paths)) = parse(&argv) else {
         // 인자 없는 재실행(단일 인스턴스 두 번째 실행 등) → 메인 창만 앞으로
         focus_main(app);
@@ -306,7 +328,7 @@ fn dispatch(app: &AppHandle, verb: Verb, paths: Vec<String>, startup: bool) {
 fn open_extract_single(app: &AppHandle, archive: String, dest: Option<String>, auto: bool) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = crate::commands::open_extract_window(app, archive, Vec::new(), dest, Some(auto), None)
+        let _ = crate::commands::open_extract_window(app, archive, Vec::new(), dest, Some(auto), None, None)
             .await;
     });
 }
@@ -326,6 +348,7 @@ fn open_extract_batch(app: &AppHandle, items: Vec<crate::models::ExtractBatchIte
             None,
             Some(true),
             Some(items),
+            None,
         )
         .await;
     });

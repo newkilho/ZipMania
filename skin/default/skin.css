@@ -53,7 +53,7 @@
     radial-gradient(120% 90% at 12% -30%, rgb(255 255 255 / 45%) 0%, rgb(255 255 255 / 0%) 60%),
     linear-gradient(180deg, var(--toolbar-deep) 0%, var(--toolbar-mid) 48%, var(--toolbar-shallow) 100%);
   --toolbar-edge: var(--toolbar-foam);
-  --toolbar-inset: inset 0 1px 0 rgb(255 255 255 / 35%);
+  --toolbar-inset: none;
   --toolbar-padding: 8px 10px 10px;
   --toolbar-btn-text: #ffffff;
   --toolbar-btn-shadow: 0 1px 2px rgb(15 23 42 / 45%);

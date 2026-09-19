@@ -11,7 +11,24 @@ export const FORM_DEFAULTS = {
   showPasswordPanel: false,
   volume: 0,
   volumeText: "",
+  verifyAfter: false,
+  deleteAfter: false,
 };
+
+/**
+ * 요청에 실린 옵션(명령줄 ZipMania.exe c ...), 없는 것은 폼 기본값, 하나도 없으면 null
+ * @param {object} launch
+ * @returns {{level:number|null, password:string|null, volume:number|null, verify:boolean, deleteSources:boolean}|null}
+ */
+export function launchOptions(launch) {
+  const level = Number.isInteger(launch?.level) ? launch.level : null;
+  const password = typeof launch?.password === "string" && launch.password !== "" ? launch.password : null;
+  const volume = Number.isInteger(launch?.volume) && launch.volume > 0 ? launch.volume : null;
+  const verify = launch?.verify === true;
+  const deleteSources = launch?.deleteSources === true;
+  if (level === null && password === null && volume === null && !verify && !deleteSources) return null;
+  return { level, password, volume, verify, deleteSources };
+}
 
 /** 배열이 아닌 값(누락, null)도 빈 배열로 받는다, */
 function list(v) {
@@ -53,6 +70,8 @@ export function planLaunch(state, launch) {
     batch,
     format: launch?.format || null,
     output: launch?.output || null,
+    // 명령줄 옵션은 자동 시작 요청에만, 폼에 얹는 요청이 남의 옵션을 바꾸지 않게
+    options: standalone ? launchOptions(launch) : null,
   };
 }
 
@@ -72,6 +91,7 @@ export function batchIssueAfter(issue, status) {
  * @param {(items:Array) => void} a.setBatch 배치 목록을 얹는다(자동 제안 억제 포함)
  * @param {() => void} a.clearBatch 앞 배치의 흔적을 지운다
  * @param {(out:string) => void} a.setOutput 출력 경로 지정(자동 제안 억제 포함)
+ * @param {(opts:object) => void} a.setOptions 명령줄 옵션(레벨, 암호, 분할, 검사, 원본 삭제) 적용
  * @param {(paths:string[]) => void} a.addInputs 입력을 목록에 추가
  * @param {() => Promise<void>} a.settle 반응성 반영 대기(Svelte tick)
  * @param {() => Promise<boolean>} a.runBatch 배치 시작 — 시작 성공 시 참
@@ -86,6 +106,7 @@ export async function runPlan(plan, a) {
   if (plan.mode === "batch") a.setBatch(plan.batch);
   else a.clearBatch();
   if (plan.mode === "auto") a.setOutput(plan.output);
+  if (plan.options) a.setOptions(plan.options);
   a.addInputs(plan.paths);
 
   // 반응성 반영(settle) 뒤 시작, 성패를 그대로 올려 보낸다

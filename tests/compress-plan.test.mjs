@@ -142,6 +142,7 @@ function makeActions({ batchOk = true, autoOk = true } = {}) {
     setBatch: (items) => log.push(`batch:${items.length}`),
     clearBatch: () => log.push("clearBatch"),
     setOutput: (o) => log.push(`output:${o}`),
+    setOptions: (o) => log.push(`options:${JSON.stringify(o)}`),
     addInputs: (p) => log.push(`inputs:${p.join(",")}`),
     settle: async () => log.push("settle"),
     runBatch: async () => {
@@ -205,6 +206,32 @@ test("배치가 아닌 요청은 앞 배치의 흔적을 지운다", async () =>
   await runPlan(plan, a);
   assert.ok(a.log.includes("clearBatch"), "앞 배치를 물려받는다");
   assert.ok(a.log.includes("output:C:/a.zip"));
+});
+
+test("명령줄 옵션은 자동 시작 요청에만 실린다", async () => {
+  // 폼에 얹기만 하는 요청이 레벨, 암호를 바꾸면 사용자가 모아 둔 설정이 조용히 바뀐다
+  const a = makeActions();
+  const launch = {
+    inputs: ["C:/a.txt"],
+    output: "C:/a.7z",
+    autoStart: true,
+    batch: [],
+    level: 9,
+    password: "pw",
+    volume: 1024,
+    verify: true,
+    deleteSources: true,
+  };
+  const plan = planLaunch({ phase: "form", inputs: [] }, launch);
+  assert.deepEqual(plan.options, { level: 9, password: "pw", volume: 1024, verify: true, deleteSources: true });
+  await runPlan(plan, a);
+  assert.ok(a.log.indexOf("reset") < a.log.findIndex((l) => l.startsWith("options:")), "옵션이 되돌리기에 지워졌다");
+  assert.ok(a.log.findIndex((l) => l.startsWith("options:")) < a.log.indexOf("startAuto"));
+
+  const plain = planLaunch({ phase: "form", inputs: [] }, { inputs: ["C:/b.txt"], batch: [], level: 9 });
+  assert.equal(plain.options, null, "얹기만 하는 요청이 옵션을 실었다");
+  const bare = planLaunch({ phase: "form", inputs: [] }, { inputs: ["C:/a.txt"], output: "C:/a.zip", autoStart: true, batch: [] });
+  assert.equal(bare.options, null, "옵션이 없는데 객체가 왔다");
 });
 
 test("독립 요청은 폼을 되돌린 뒤 얹는다", async () => {

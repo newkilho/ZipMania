@@ -607,6 +607,26 @@ export async function deleteFile(path) {
 }
 
 /**
+ * 압축 입력 삭제(파일, 폴더 통째), 압축 창 [압축 후 원본 삭제]
+ * @param {string[]} paths
+ * @returns {Promise<string[]>} 지우지 못한 항목("경로: 오류")
+ */
+export async function deletePaths(paths) {
+  return await invoke("delete_paths", { paths });
+}
+
+/**
+ * 아카이브 무결성 검사(동기, 작업 등록 없음), 압축 창 [압축 후 검사], 실패 = ZipManiaError
+ * @param {string} archive
+ * @param {string} [password]
+ * @returns {Promise<void>}
+ */
+export async function verifyArchive(archive, password) {
+  const args = password != null && password !== "" ? { archive, password } : { archive };
+  return await invoke("verify_archive", args);
+}
+
+/**
  * 폴더를 탐색기로 열기
  * @param {string} path 열 폴더 경로
  * @returns {Promise<void>}

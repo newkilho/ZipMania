@@ -1,0 +1,14 @@
+[package]
+name = "zm"
+version = "0.9.8"
+edition = "2021"
+rust-version = "1.88"
+description = "ZipMania console launcher"
+license = "Apache-2.0"
+
+[[bin]]
+name = "zm"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "0.3"

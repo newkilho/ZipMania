@@ -173,36 +173,9 @@ impl PropVariant {
     }
 }
 
-/// FILETIME → YYYY-MM-DD HH:MM:SS(UTC), 0 또는 범위 밖 = 빈 문자열
+/// FILETIME → 로컬 YYYY-MM-DD HH:MM:SS, 0 또는 범위 밖 = 빈 문자열
 pub fn filetime_to_string(ft: u64) -> String {
-    if ft == 0 {
-        return String::new();
-    }
-    // 100ns → 초, 1601→1970 오프셋 보정
-    let secs_since_1601 = (ft / 10_000_000) as i64;
-    let unix = secs_since_1601 - 11_644_473_600;
-
-    let days = unix.div_euclid(86_400);
-    let secs_of_day = unix.rem_euclid(86_400);
-    let (h, mi, s) = (
-        secs_of_day / 3600,
-        (secs_of_day % 3600) / 60,
-        secs_of_day % 60,
-    );
-
-    // Howard Hinnant civil_from_days
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = y + if m <= 2 { 1 } else { 0 };
-
-    format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}:{s:02}")
+    crate::times::filetime_to_local_string(i64::try_from(ft).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -241,7 +214,7 @@ mod tests {
         // unix = 1784872957 → filetime = (unix + 11644473600) * 10^7
         let unix: u64 = 1_784_872_957;
         let ft = (unix + 11_644_473_600) * 10_000_000;
-        assert_eq!(filetime_to_string(ft), "2026-07-24 06:02:37");
+        assert_eq!(filetime_to_string(ft), crate::times::unix_to_local_string(unix as i64));
         assert_eq!(filetime_to_string(0), "");
     }
 }
